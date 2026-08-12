@@ -148,8 +148,78 @@ CTL
     echo "  warpctl ip        出口 IP"
     echo "  warpctl log       日志"
     echo ""
+    echo "接入/断开:"
+    echo "  sh $0 sb-on       接入 sing-box"
+    echo "  sh $0 sb-off      断开 sing-box"
+    echo "  sh $0 sq-on       接入 shadowquic"
+    echo "  sh $0 sq-off      断开 shadowquic"
+    echo ""
     echo "卸载: sh $0 remove"
     echo ""
+}
+
+# 接入 sing-box
+sb_on() {
+    [ ! -f /etc/sing-box/config.json ] && err "未找到 sing-box 配置文件"
+    cp /etc/sing-box/config.json /etc/sing-box/config.json.bak
+    jq '.outbounds += [{"type":"socks","tag":"warp","server":"127.0.0.1","server_port":1080,"version":"5"}] | .route.final = "warp"' /etc/sing-box/config.json > /tmp/sb.json && mv /tmp/sb.json /etc/sing-box/config.json
+    pkill -f "sing-box run" 2>/dev/null || true
+    sleep 1
+    mkdir -p /var/log/sing-box
+    nohup sing-box run -c /etc/sing-box/config.json >/dev/null 2>&1 &
+    log "sing-box 已接入 WARP"
+}
+
+# 断开 sing-box
+sb_off() {
+    [ ! -f /etc/sing-box/config.json ] && err "未找到 sing-box 配置文件"
+    cp /etc/sing-box/config.json /etc/sing-box/config.json.bak
+    jq 'del(.outbounds[]|select(.tag=="warp")) | .route.final = "direct"' /etc/sing-box/config.json > /tmp/sb.json && mv /tmp/sb.json /etc/sing-box/config.json
+    pkill -f "sing-box run" 2>/dev/null || true
+    sleep 1
+    mkdir -p /var/log/sing-box
+    nohup sing-box run -c /etc/sing-box/config.json >/dev/null 2>&1 &
+    log "sing-box 已断开 WARP"
+}
+
+# 接入 shadowquic
+sq_on() {
+    mkdir -p /etc/shadowquic
+    cat > /etc/shadowquic/server-warp.yaml << 'YAML'
+inbound:
+  type: shadowquic
+  bind-addr: "[::]:1443"
+  users:
+    - username: "user1"
+      password: "changeme"
+  server-name: "www.apple.com"
+  jls-upstream:
+    addr: "www.apple.com:443"
+    rate-limit: 1000000
+  alpn: ["h3"]
+  zero-rtt: true
+  congestion-control: bbr
+  gso: true
+  mtu-discovery: true
+  blackhole-detection: false
+  initial-mtu: 1300
+  min-mtu: 1200
+outbound:
+  type: socks
+  addr: "127.0.0.1:1080"
+log-level: info
+YAML
+    echo "warp" > /etc/shadowquic/last-mode
+    log "shadowquic 配置已生成"
+    [ -f /etc/init.d/shadowquic ] && rc-service shadowquic restart 2>/dev/null || true
+}
+
+# 断开 shadowquic
+sq_off() {
+    rm -f /etc/shadowquic/server-warp.yaml
+    echo "direct" > /etc/shadowquic/last-mode
+    [ -f /etc/init.d/shadowquic ] && rc-service shadowquic restart 2>/dev/null || true
+    log "shadowquic 已切换为直连"
 }
 
 # 卸载
@@ -164,6 +234,10 @@ remove() {
 
 case "${1:-install}" in
     install|"") install;;
+    sb-on) sb_on;;
+    sb-off) sb_off;;
+    sq-on) sq_on;;
+    sq-off) sq_off;;
     remove|uninstall) remove;;
-    *) echo "用法: $0 {install|remove}";;
+    *) echo "用法: $0 {install|sb-on|sb-off|sq-on|sq-off|remove}";;
 esac
