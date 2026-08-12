@@ -28,6 +28,8 @@ sh install-warp-alpine.sh sb-on
 
 # 断开 sing-box（恢复直连）
 sh install-warp-alpine.sh sb-off
+
+#总结
 sh install-warp-alpine.sh             安装
 sh install-warp-alpine.sh remove      卸载
 sh install-warp-alpine.sh sb-on       接入 sing-box
