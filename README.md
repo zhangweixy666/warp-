@@ -11,7 +11,6 @@
 - 🔌 **灵活** — 可随时接入或断开 sing-box / shadowquic（互不冲突，分开选择）
 
 ## 一键安装
-bash
 wget -O- https://raw.githubusercontent.com/zhangweixy666/warp-/main/install-warp-alpine.sh | sh
 
 warpctl status             查看运行状态（PID + 出口 IP）
