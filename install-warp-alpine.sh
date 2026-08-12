@@ -16,6 +16,44 @@ if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "amd64" ]; then
 fi
 echo "[✓] 系统: Alpine Linux x86_64"
 
+ACTION="${1:-install}"
+case "$ACTION" in
+    install)
+        ;;
+    sb-on)
+        [ -x /usr/local/bin/sb-on ] || { echo "[错误] sb-on 尚未安装，请先运行默认安装"; exit 1; }
+        exec /usr/local/bin/sb-on
+        ;;
+    sb-off)
+        [ -x /usr/local/bin/sb-off ] || { echo "[错误] sb-off 尚未安装，请先运行默认安装"; exit 1; }
+        exec /usr/local/bin/sb-off
+        ;;
+    remove|uninstall)
+        rc-service shadowquic stop 2>/dev/null || true
+        rc-service warp-go stop 2>/dev/null || true
+        rc-update del shadowquic default 2>/dev/null || true
+        rc-update del warp-go default 2>/dev/null || true
+        pkill -9 -f '[/]usr/local/bin/shadowquic -c' 2>/dev/null || true
+        pkill -9 -f '[/]usr/local/bin/shadowquic-daemon.sh' 2>/dev/null || true
+        pkill -f '[/]usr/local/bin/warp -ip' 2>/dev/null || true
+        rm -f /etc/init.d/shadowquic /etc/init.d/warp-go \
+            /usr/local/bin/shadowquic /usr/local/bin/shadowquic-daemon.sh \
+            /usr/local/bin/switch-quic /usr/local/bin/quic-manager \
+            /usr/local/bin/warp /usr/local/bin/warpctl \
+            /usr/local/bin/warp-manager /usr/local/bin/sb-on \
+            /usr/local/bin/sb-off /usr/local/bin/sb-restart \
+            /usr/local/bin/warp-keepalive.sh
+        rm -rf /etc/shadowquic /opt/warp-go
+        (crontab -l 2>/dev/null | grep -v warp-keepalive | crontab -) 2>/dev/null || true
+        echo "[✓] 已卸载 WARP + ShadowQuic"
+        exit 0
+        ;;
+    *)
+        echo "用法: sh $0 [install|sb-on|sb-off|remove]"
+        exit 2
+        ;;
+esac
+
 apk update >/dev/null 2>&1 || true
 apk add --no-cache curl jq procps bash dialog nano >/dev/null 2>&1 || true
 
@@ -173,7 +211,13 @@ setup_commands() {
     # switch-quic
     cat > /usr/local/bin/switch-quic << 'SWITCH'
 #!/bin/sh
-stop_all() { rc-service shadowquic stop 2>/dev/null; pkill -9 -f shadowquic 2>/dev/null; pkill -9 -f supervise-daemon 2>/dev/null; sleep 2; }
+stop_all() {
+    rc-service shadowquic stop 2>/dev/null || true
+    pkill -9 -f '[/]usr/local/bin/shadowquic -c' 2>/dev/null || true
+    pkill -9 -f '[/]usr/local/bin/shadowquic-daemon.sh' 2>/dev/null || true
+    pkill -9 -f 'supervise-daemon shadowquic' 2>/dev/null || true
+    sleep 2
+}
 case "${1:-}" in
     direct)  stop_all; echo "direct" > /etc/shadowquic/last-mode; rc-service shadowquic start; echo "已切换到直连出站" ;;
     socks)   stop_all; echo "socks" > /etc/shadowquic/last-mode; rc-service shadowquic start; echo "已切换到 SOCKS5 出站" ;;
@@ -191,7 +235,15 @@ SWITCH
 #!/bin/sh
 case "${1:-status}" in
     status|st) P=$(pgrep -f "/usr/local/bin/warp -ip" | head -1); [ -n "$P" ] && echo "运行中 PID=$P 出口IP=$(curl -x socks5h://127.0.0.1:1080 -s --connect-timeout 3 https://ipv4.icanhazip.com 2>/dev/null || echo ?)" || echo "未运行";;
-    restart|re) pkill -f "/usr/local/bin/warp -ip" 2>/dev/null || true; sleep 1; cd /opt/warp-go; curl -6 -s --connect-timeout 3 https://ipv6.icanhazip.com -o /dev/null 2>/dev/null && M=6 || M=4; nohup /usr/local/bin/warp -ip "$M" -l 127.0.0.1:1080 > /opt/warp-go/warp.log 2>&1 &; sleep 3; curl -x socks5h://127.0.0.1:1080 -s --connect-timeout 5 https://ipv4.icanhazip.com;;
+    restart|re)
+        pkill -f '[/]usr/local/bin/warp -ip' 2>/dev/null || true
+        sleep 1
+        cd /opt/warp-go
+        curl -6 -s --connect-timeout 3 https://ipv6.icanhazip.com -o /dev/null 2>/dev/null && M=6 || M=4
+        nohup /usr/local/bin/warp -ip "$M" -l 127.0.0.1:1080 > /opt/warp-go/warp.log 2>&1 &
+        sleep 3
+        curl -x socks5h://127.0.0.1:1080 -s --connect-timeout 5 https://ipv4.icanhazip.com
+        ;;
     ip) curl -x socks5h://127.0.0.1:1080 -s --connect-timeout 5 https://ipv4.icanhazip.com 2>/dev/null || echo "不可用";;
     log) tail -30 /var/log/warp-go.log 2>/dev/null || echo "无日志";;
     *) echo "用法: warpctl status|restart|ip|log";;
@@ -199,15 +251,97 @@ esac
 CTL
     chmod +x /usr/local/bin/warpctl
 
+    # sing-box 开关脚本
+    cat > /usr/local/bin/sb-on << 'SBON'
+#!/bin/sh
+set -eu
+CONFIG=/etc/sing-box/config.json
+[ -f "$CONFIG" ] || { echo "[错误] 未找到 $CONFIG"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "[错误] 未找到 jq"; exit 1; }
+cp "$CONFIG" "$CONFIG.bak"
+jq 'if any(.outbounds[]?; .tag == "warp") then . else .outbounds += [{"type":"socks","tag":"warp","server":"127.0.0.1","server_port":1080,"version":"5"}] end | .route.final = "warp"' "$CONFIG" > "$CONFIG.tmp"
+mv "$CONFIG.tmp" "$CONFIG"
+pkill -f '[s]ing-box run' 2>/dev/null || true
+nohup sing-box run -c "$CONFIG" >/var/log/sing-box.log 2>&1 &
+echo "[✓] sing-box 已接入 WARP"
+SBON
+    chmod +x /usr/local/bin/sb-on
+
+    cat > /usr/local/bin/sb-off << 'SBOFF'
+#!/bin/sh
+set -eu
+CONFIG=/etc/sing-box/config.json
+[ -f "$CONFIG" ] || { echo "[错误] 未找到 $CONFIG"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "[错误] 未找到 jq"; exit 1; }
+cp "$CONFIG" "$CONFIG.bak"
+jq 'del(.outbounds[]? | select(.tag == "warp")) | if .route.final == "warp" then .route.final = "direct" else . end' "$CONFIG" > "$CONFIG.tmp"
+mv "$CONFIG.tmp" "$CONFIG"
+pkill -f '[s]ing-box run' 2>/dev/null || true
+nohup sing-box run -c "$CONFIG" >/var/log/sing-box.log 2>&1 &
+echo "[✓] sing-box 已切换为直连"
+SBOFF
+    chmod +x /usr/local/bin/sb-off
+
+    # 总管理面板
+    cat > /usr/local/bin/warp-manager << 'WMANAGER'
+#!/bin/sh
+RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+pause() { read -r -p "按回车返回..." _; }
+while true; do
+    clear
+    MODE=$(cat /etc/shadowquic/last-mode 2>/dev/null || echo "未安装")
+    WARP_STATE=$(pgrep -f '[/]usr/local/bin/warp -ip' >/dev/null 2>&1 && echo "运行中" || echo "已停止")
+    SQ_STATE=$(pgrep -f '[/]usr/local/bin/shadowquic -c' >/dev/null 2>&1 && echo "运行中" || echo "已停止")
+    echo -e "${BOLD}========================================${NC}"
+    echo -e "${BOLD}      WARP + ShadowQuic 管理面板${NC}"
+    echo -e "${BOLD}========================================${NC}"
+    echo "WARP: $WARP_STATE | ShadowQuic: $SQ_STATE | 模式: $MODE"
+    echo ""
+    echo "1. WARP 状态"
+    echo "2. 重启 WARP"
+    echo "3. ShadowQuic 直连出站"
+    echo "4. ShadowQuic SOCKS5 出站"
+    echo "5. ShadowQuic 状态"
+    echo "6. ShadowQuic 日志"
+    echo "7. 打开 ShadowQuic 面板"
+    echo "8. Sing-box 接入 WARP"
+    echo "9. Sing-box 断开 WARP"
+    echo "0. 退出"
+    echo ""
+    read -r -p "请选择 [0-9]: " choice
+    case "$choice" in
+        1) warpctl status; pause;;
+        2) warpctl restart; pause;;
+        3) switch-quic direct; pause;;
+        4) switch-quic socks; pause;;
+        5) switch-quic status; pause;;
+        6) switch-quic log; pause;;
+        7) exec quic-manager;;
+        8) sb-on; pause;;
+        9) sb-off; pause;;
+        0) exit 0;;
+        *) echo -e "${RED}无效选项${NC}"; sleep 1;;
+    esac
+done
+WMANAGER
+    chmod +x /usr/local/bin/warp-manager
+    echo "[✓] warp-manager 已安装"
+
     # quic-manager
     cat > /usr/local/bin/quic-manager << 'MANAGER'
 #!/bin/sh
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-stop_all() { rc-service shadowquic stop 2>/dev/null; pkill -9 -f shadowquic 2>/dev/null; pkill -9 -f supervise-daemon 2>/dev/null; sleep 2; }
+stop_all() {
+    rc-service shadowquic stop 2>/dev/null || true
+    pkill -9 -f '[/]usr/local/bin/shadowquic -c' 2>/dev/null || true
+    pkill -9 -f '[/]usr/local/bin/shadowquic-daemon.sh' 2>/dev/null || true
+    pkill -9 -f 'supervise-daemon shadowquic' 2>/dev/null || true
+    sleep 2
+}
 show_menu() {
     while true; do
         MODE=$(cat /etc/shadowquic/last-mode 2>/dev/null || echo "direct")
-        if pgrep -f 'shadowquic -c' >/dev/null 2>&1; then RUNNING="${GREEN}● 运行中${NC}"; else RUNNING="${RED}● 已停止${NC}"; fi
+        if pgrep -f 'shadowquic -c' >/dev/null 2>&1; then RUNNING="${GREEN}● 运行中${NC}"; else RUNNING="${RED}● 已��止${NC}"; fi
         clear
         echo -e "${BOLD}╔══════════════════════════════════════╗${NC}"
         echo -e "${BOLD}║        ShadowQuic 管理面板          ║${NC}"
