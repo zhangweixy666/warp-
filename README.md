@@ -96,7 +96,24 @@ ss -lntup
 
 ```bash
 sh /root/install-warp-alpine.sh singbox-install
+```
+
+安装模块只会安装 sing-box 二进制和管理器，不会自动创建节点配置。首次使用需要至少配置一个节点，例如：
+
+```bash
+# 交互式配置 VLESS + WebSocket
+singbox-manager vless-ws
+
+# 或打开菜单，按“节点管理”完成配置
 singbox-manager
+```
+
+配置过程中请填写 VPS 的公网 IP 或域名，不要使用 `127.0.0.1`、`127.0.1.1` 等回环地址。配置完成后检查：
+
+```bash
+singbox-status
+sing-box check -c /etc/sing-box/config.json
+rc-service sing-box status
 ```
 
 模块使用 sing-box `1.13.14`，上游管理器支持常见协议和能力，包括：
@@ -144,6 +161,8 @@ singbox-warp-off
 ```
 
 该命令会删除 WARP 出站、恢复 `direct`，并再次校验配置。WARP 开关不会重启 ShadowQuic。
+
+> `singbox-warp-on/off` 要求 `/etc/sing-box/config.json` 已存在，且至少已经配置一个 sing-box 节点。每次切换前会自动备份当前配置到 `/etc/sing-box/backups/`。
 
 ## 🗂️ 配置与备份
 
