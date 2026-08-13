@@ -28,6 +28,10 @@ case "$ACTION" in
         [ -x /usr/local/bin/sb-off ] || { echo "[错误] sb-off 尚未安装，请先运行默认安装"; exit 1; }
         exec /usr/local/bin/sb-off
         ;;
+    singbox-install|singbox-manager|singbox-status|singbox-restart|singbox-warp-on|singbox-warp-off|singbox-backup|singbox-restore|singbox-remove)
+        [ -x "/usr/local/bin/$ACTION" ] || { echo "[错误] $ACTION 尚未安装，请先运行默认安装"; exit 1; }
+        exec "/usr/local/bin/$ACTION"
+        ;;
     remove|uninstall)
         rc-service shadowquic stop 2>/dev/null || true
         rc-service warp-go stop 2>/dev/null || true
@@ -256,13 +260,16 @@ CTL
 #!/bin/sh
 set -eu
 CONFIG=/etc/sing-box/config.json
+BIN=/usr/local/bin/sing-box
 [ -f "$CONFIG" ] || { echo "[错误] 未找到 $CONFIG"; exit 1; }
+[ -x "$BIN" ] || { echo "[错误] 未找到 $BIN"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "[错误] 未找到 jq"; exit 1; }
-cp "$CONFIG" "$CONFIG.bak"
+mkdir -p /etc/sing-box/backups
+cp -p "$CONFIG" "/etc/sing-box/backups/config.json.before-warp-$(date +%Y%m%d_%H%M%S)"
 jq 'if any(.outbounds[]?; .tag == "warp") then . else .outbounds += [{"type":"socks","tag":"warp","server":"127.0.0.1","server_port":1080,"version":"5"}] end | .route.final = "warp"' "$CONFIG" > "$CONFIG.tmp"
+"$BIN" check -c "$CONFIG.tmp"
 mv "$CONFIG.tmp" "$CONFIG"
-pkill -f '[s]ing-box run' 2>/dev/null || true
-nohup sing-box run -c "$CONFIG" >/var/log/sing-box.log 2>&1 &
+rc-service sing-box restart >/dev/null 2>&1 || rc-service sing-box start >/dev/null 2>&1
 echo "[✓] sing-box 已接入 WARP"
 SBON
     chmod +x /usr/local/bin/sb-on
@@ -271,13 +278,16 @@ SBON
 #!/bin/sh
 set -eu
 CONFIG=/etc/sing-box/config.json
+BIN=/usr/local/bin/sing-box
 [ -f "$CONFIG" ] || { echo "[错误] 未找到 $CONFIG"; exit 1; }
+[ -x "$BIN" ] || { echo "[错误] 未找到 $BIN"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "[错误] 未找到 jq"; exit 1; }
-cp "$CONFIG" "$CONFIG.bak"
+mkdir -p /etc/sing-box/backups
+cp -p "$CONFIG" "/etc/sing-box/backups/config.json.before-direct-$(date +%Y%m%d_%H%M%S)"
 jq 'del(.outbounds[]? | select(.tag == "warp")) | if .route.final == "warp" then .route.final = "direct" else . end' "$CONFIG" > "$CONFIG.tmp"
+"$BIN" check -c "$CONFIG.tmp"
 mv "$CONFIG.tmp" "$CONFIG"
-pkill -f '[s]ing-box run' 2>/dev/null || true
-nohup sing-box run -c "$CONFIG" >/var/log/sing-box.log 2>&1 &
+rc-service sing-box restart >/dev/null 2>&1 || rc-service sing-box start >/dev/null 2>&1
 echo "[✓] sing-box 已切换为直连"
 SBOFF
     chmod +x /usr/local/bin/sb-off
@@ -326,6 +336,131 @@ done
 WMANAGER
     chmod +x /usr/local/bin/warp-manager
     echo "[✓] warp-manager 已安装"
+
+    # ---------- 可选 sing-box 1.13.14 模块 ----------
+    cat > /usr/local/bin/singbox-install << 'SBI'
+#!/bin/sh
+set -eu
+M=/usr/local/bin/singbox-manager.sh
+U=https://raw.githubusercontent.com/zhangweixy666/-singbox1.3.x-vless-anytls/main/singbox-manager.sh
+if [ ! -s "$M" ]; then
+    echo "[i] 下载 sing-box 管理器..."
+    curl -fsSL "$U" -o "$M.tmp"
+    head -c 4 "$M.tmp" | grep -q '#!/b' || { rm -f "$M.tmp"; echo "[✗] 下载失败"; exit 1; }
+    mv "$M.tmp" "$M"
+    chmod 755 "$M"
+fi
+if [ -x /usr/local/bin/sing-box ]; then
+    echo "[✓] sing-box 已安装"
+else
+    "$M" install
+fi
+echo "[✓] sing-box 模块安装完成"
+echo "可用命令: singbox-manager singbox-status singbox-restart"
+SBI
+    chmod +x /usr/local/bin/singbox-install
+
+    cat > /usr/local/bin/singbox-manager << 'SBM'
+#!/bin/sh
+set -eu
+M=/usr/local/bin/singbox-manager.sh
+[ -s "$M" ] || /usr/local/bin/singbox-install
+exec "$M" "$@"
+SBM
+    chmod +x /usr/local/bin/singbox-manager
+
+    cat > /usr/local/bin/singbox-status << 'SBS'
+#!/bin/sh
+set +e
+echo "=== sing-box 状态 ==="
+if [ -x /usr/local/bin/sing-box ]; then
+    /usr/local/bin/sing-box version 2>/dev/null | head -1
+else
+    echo "二进制未安装"
+fi
+if pgrep -f '[s]ing-box run' >/dev/null 2>&1; then echo "进程: 运行中"; else echo "进程: 未运行"; fi
+if [ -f /etc/sing-box/config.json ] && [ -x /usr/local/bin/sing-box ]; then
+    /usr/local/bin/sing-box check -c /etc/sing-box/config.json
+else
+    echo "配置不存在或二进制未安装"
+fi
+rc-service sing-box status 2>/dev/null || true
+SBS
+    chmod +x /usr/local/bin/singbox-status
+
+    cat > /usr/local/bin/singbox-restart << 'SBR'
+#!/bin/sh
+set -eu
+B=/usr/local/bin/sing-box
+C=/etc/sing-box/config.json
+[ -x "$B" ] || { echo "[错误] sing-box 未安装"; exit 1; }
+[ -f "$C" ] || { echo "[错误] 配置不存在"; exit 1; }
+"$B" check -c "$C"
+rc-service sing-box restart 2>/dev/null || rc-service sing-box start
+echo "[✓] sing-box 已重启"
+SBR
+    chmod +x /usr/local/bin/singbox-restart
+
+    cat > /usr/local/bin/singbox-backup << 'SBB'
+#!/bin/sh
+set -eu
+C=/etc/sing-box/config.json
+[ -f "$C" ] || { echo "[错误] 配置不存在"; exit 1; }
+D=/etc/sing-box/backups
+mkdir -p "$D"
+T=$(date +%Y%m%d_%H%M%S)
+cp -p "$C" "$D/config.json.$T"
+[ ! -f /etc/sing-box/params.env ] || cp -p /etc/sing-box/params.env "$D/params.env.$T"
+echo "[✓] 已备份: $D/config.json.$T"
+SBB
+    chmod +x /usr/local/bin/singbox-backup
+
+    cat > /usr/local/bin/singbox-restore << 'SBRST'
+#!/bin/sh
+set -eu
+D=/etc/sing-box/backups
+C=/etc/sing-box/config.json
+[ -d "$D" ] || { echo "[错误] 没有备份目录"; exit 1; }
+B=$(ls -1t "$D"/config.json.* 2>/dev/null | head -1 || true)
+[ -n "$B" ] || { echo "[错误] 没有可恢复的备份"; exit 1; }
+cp -p "$C" "$C.before-restore.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+cp -p "$B" "$C"
+if /usr/local/bin/sing-box check -c "$C"; then
+    rc-service sing-box restart 2>/dev/null || true
+    echo "[✓] 已恢复: $B"
+else
+    echo "[✗] 恢复后的配置校验失败，保留当前文件备份"
+    exit 1
+fi
+SBRST
+    chmod +x /usr/local/bin/singbox-restore
+
+    cat > /usr/local/bin/singbox-warp-on << 'SBWO'
+#!/bin/sh
+exec /usr/local/bin/sb-on
+SBWO
+    chmod +x /usr/local/bin/singbox-warp-on
+
+    cat > /usr/local/bin/singbox-warp-off << 'SBWF'
+#!/bin/sh
+exec /usr/local/bin/sb-off
+SBWF
+    chmod +x /usr/local/bin/singbox-warp-off
+
+    cat > /usr/local/bin/singbox-remove << 'SBRM'
+#!/bin/sh
+set -eu
+rc-service sing-box stop 2>/dev/null || true
+rc-update del sing-box default 2>/dev/null || true
+rm -f /etc/init.d/sing-box /usr/local/bin/sing-box /usr/local/bin/singbox-manager.sh
+rm -f /usr/local/bin/singbox-install /usr/local/bin/singbox-manager
+rm -f /usr/local/bin/singbox-status /usr/local/bin/singbox-restart
+rm -f /usr/local/bin/singbox-backup /usr/local/bin/singbox-restore
+rm -f /usr/local/bin/singbox-warp-on /usr/local/bin/singbox-warp-off /usr/local/bin/singbox-remove
+echo "[✓] sing-box 程序和服务已删除"
+echo "配置、证书和备份仍保留在 /etc/sing-box/"
+SBRM
+    chmod +x /usr/local/bin/singbox-remove
 
     # quic-manager
     cat > /usr/local/bin/quic-manager << 'MANAGER'
