@@ -1,87 +1,73 @@
-# 🚀 warp-go + shadowquic 一键部署
+# warp-go + ShadowQuic + sing-box
 
-## 📖 项目简介
+仅支持 **Alpine Linux x86_64/amd64**。
 
-面向 **Alpine Linux x86_64** 的 WARP + ShadowQuic 一键部署脚本。
-默认安装流程会下载并注册 WARP，下载 x86_64 版 ShadowQuic，创建直连/SOCKS5 双配置、OpenRC 服务和交互管理命令。
+## 默认安装
 
-## ✨ 核心特性
-
-- 🛡️ WARP SOCKS5 出口：`127.0.0.1:1080`
-- 🚀 ShadowQuic QUIC 入站：UDP `1443`
-- 🔄 直连 / SOCKS5 出站一键切换
-- 🖥️ `warp-manager` 和 `quic-manager` 交互面板
-- ⚡ BBR、GSO、MTU 探测、Zero-RTT
-- 🔋 WARP 保活和 ShadowQuic 开机自启
-- 🔌 可选接入 sing-box
-
-## 💡 快速部署
+默认只安装 WARP SOCKS5、ShadowQuic、OpenRC 服务、保活和管理命令。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhangweixy666/warp-/main/install-warp-alpine.sh \
-  -o /root/install-warp-alpine.sh
+curl -fsSL https://raw.githubusercontent.com/zhangweixy666/warp-/main/install-warp-alpine.sh -o /root/install-warp-alpine.sh
 sh /root/install-warp-alpine.sh
 ```
 
-> 脚本只接受 Alpine Linux x86_64/amd64。其他系统或架构会直接退出。
-
-## 📋 管理命令
-
-| 命令 | 说明 |
-|------|------|
-| `warp-manager` | WARP + ShadowQuic + sing-box 总菜单 |
-| `warpctl status` | WARP 状态和出口 IP |
-| `warpctl restart` | 重启 WARP |
-| `warpctl ip` | 查看 WARP 出口 IP |
-| `warpctl log` | 查看 WARP 日志 |
-| `quic-manager` | ShadowQuic 交互面板 |
-| `switch-quic direct` | 直连出站 |
-| `switch-quic socks` | SOCKS5 出站，走 WARP |
-| `switch-quic status` | 查看 ShadowQuic 状态 |
-| `switch-quic log` | 查看 ShadowQuic 日志 |
-| `switch-quic restart` | 重启 ShadowQuic |
-| `switch-quic stop` | 停止 ShadowQuic |
-
-## 🔧 sing-box
-
-安装完成且存在 `/etc/sing-box/config.json` 后：
+## 管理命令
 
 ```bash
-sh /root/install-warp-alpine.sh sb-on   # 添加 WARP SOCKS5 出站并启用
-sh /root/install-warp-alpine.sh sb-off  # 删除 WARP 出站并恢复 direct
+warp-manager
+warpctl status
+warpctl restart
+warpctl ip
+quic-manager
+switch-quic direct
+switch-quic socks
+switch-quic status
+switch-quic restart
 ```
 
-也可以在 `warp-manager` 中选择 8/9。
+默认端口：
 
-## 🔑 默认配置
-
-| 项目 | 默认值 |
-|------|--------|
+| 项目 | 地址 |
+|---|---|
 | WARP SOCKS5 | `127.0.0.1:1080` |
-| ShadowQuic 端口 | `1443/UDP` |
-| 用户名 | `user1` |
-| 密码 | `changeme` |
-| 伪装域名 | `www.apple.com` |
+| ShadowQuic | UDP `1443` |
 
-请在实际使用前修改 `/etc/shadowquic/server-direct.yaml` 和 `server-socks.yaml` 中的用户名、密码及相关参数。
+## 可选 sing-box 模块
 
-## 🗑️ 卸载
+默认不会安装 sing-box。需要时执行：
+
+```bash
+sh /root/install-warp-alpine.sh singbox-install
+singbox-manager
+```
+
+模块使用 sing-box 1.13.14 管理器，支持 VLESS+Reality、AnyTLS、TUIC、Hysteria2、VLESS/VMess+WS、证书和 Reality 密钥管理。
+
+快捷命令：
+
+```bash
+singbox-install
+singbox-manager
+singbox-status
+singbox-restart
+singbox-backup
+singbox-restore
+singbox-warp-on
+singbox-warp-off
+singbox-remove
+```
+
+`singbox-warp-on/off` 会先校验配置，再通过 OpenRC 重启 sing-box，并在修改前创建时间戳备份；不会重启 WARP 或 ShadowQuic。
+
+## 卸载
 
 ```bash
 sh /root/install-warp-alpine.sh remove
+singbox-remove
 ```
 
-## ⚠️ 注意事项
+`singbox-remove` 只删除 sing-box 程序和服务，保留 `/etc/sing-box/` 下的配置、证书和备份。
 
-- 仅支持 Alpine Linux x86_64/amd64，并需要 root 权限。
-- 请确保 UDP `1443` 已在云服务商安全组和防火墙放行。
-- 默认密码仅用于初始配置，部署后应立即修改。
+## 注意
 
-## 🙏 鸣谢
-
-- [warp-go](https://github.com/badafans/warp-go)
-- [shadowquic](https://github.com/spongebob888/shadowquic)
-
-## ⚠️ 免责声明
-
-本项目仅供教育、科学研究及个人安全测试使用。使用者须遵守所在地法律法规，作者不对滥用或由此产生的损失负责。
+请修改 ShadowQuic 默认密码，并在云服务商安全组放行 UDP 1443。本项目仅供教育、研究和个人测试使用，请遵守所在地法律法规。
