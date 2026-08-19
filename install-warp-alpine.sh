@@ -342,13 +342,21 @@ WMANAGER
 #!/bin/sh
 set -eu
 M=/usr/local/bin/singbox-manager.sh
-U=https://raw.githubusercontent.com/zhangweixy666/-singbox1.3.x-vless-anytls/main/singbox-manager.sh
-if [ ! -s "$M" ]; then
-    echo "[i] 下载 sing-box 管理器..."
-    curl -fsSL "$U" -o "$M.tmp"
-    head -c 4 "$M.tmp" | grep -q '#!/b' || { rm -f "$M.tmp"; echo "[✗] 下载失败"; exit 1; }
-    mv "$M.tmp" "$M"
+# 固定使用第二个仓库的已验证提交；不追踪 sing-box 或管理脚本的最新版本。
+MANAGER_REF=432141cb5690e932f62b2380aa6dd8d045bfc5be
+U=https://raw.githubusercontent.com/zhangweixy666/-singbox1.3.x-vless-anytls/$MANAGER_REF/singbox-manager.sh
+TMP="$M.tmp.$$"
+trap 'rm -f "$TMP"' EXIT INT TERM
+echo "[i] 同步 sing-box 管理器固定版本: $MANAGER_REF"
+curl -fsSL "$U" -o "$TMP"
+[ -s "$TMP" ] && head -n 1 "$TMP" | grep -q '^#!/bin/sh$' || { rm -f "$TMP"; echo "[✗] sing-box 管理器下载内容无效"; exit 1; }
+if [ ! -s "$M" ] || ! cmp -s "$TMP" "$M"; then
+    mv "$TMP" "$M"
     chmod 755 "$M"
+    echo "[✓] sing-box 管理器已同步"
+else
+    rm -f "$TMP"
+    echo "[✓] sing-box 管理器已是固定版本"
 fi
 if [ -x /usr/local/bin/sing-box ]; then
     echo "[✓] sing-box 已安装"
@@ -364,7 +372,8 @@ SBI
 #!/bin/sh
 set -eu
 M=/usr/local/bin/singbox-manager.sh
-[ -s "$M" ] || /usr/local/bin/singbox-install
+# 每次调用先同步固定管理脚本；不会因为同步而更新已有 sing-box 二进制。
+/usr/local/bin/singbox-install
 exec "$M" "$@"
 SBM
     chmod +x /usr/local/bin/singbox-manager
