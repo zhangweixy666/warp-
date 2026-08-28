@@ -63,6 +63,21 @@ sh /root/install-warp-alpine.sh
 - ShadowQuic 默认账号：`user1`
 - ShadowQuic 默认密码：`changeme`
 
+## 🎛️ 分模式安装
+不需要全部组件时，可以只装其中一项：
+安装 WARP + ShadowQuic（完整，默认）：
+```bash
+sh /root/install-warp-alpine.sh all
+```
+只安装 WARP（SOCKS5 127.0.0.1:1080）：
+```bash
+sh /root/install-warp-alpine.sh warp
+```
+只安装 ShadowQuic（UDP 1443）：
+```bash
+sh /root/install-warp-alpine.sh quic
+```
+> 说明：不带参数与 `all` 等效；`warp` / `quic` 模式只安装对应组件和服务。
 ## 🧰 WARP 管理
 
 查看 WARP 状态和出口 IP：
@@ -233,6 +248,28 @@ tail -n 100 /var/log/sing-box/sing-box.log
 - Cloudflare ACME 证书
 
 > 默认测试使用的是 VLESS + WebSocket 无 TLS 配置，适合验证服务和配置流程，不建议直接作为生产公网节点使用。正式部署建议使用 Reality、TLS 或反向代理，并设置安全的认证参数。
+
+## ⚡ sing-box 快捷开关
+安装好 sing-box 并配置节点后，可用快捷命令一键切换出站：
+经 WARP 出站（等效 `singbox-warp-on`）：
+```bash
+sh /root/install-warp-alpine.sh sb-on
+```
+恢复直连出站（等效 `singbox-warp-off`）：
+```bash
+sh /root/install-warp-alpine.sh sb-off
+```
+重启 sing-box（等效 `singbox-restart`）：
+```bash
+sh /root/install-warp-alpine.sh sb-restart
+```
+已安装后也可直接运行：
+```bash
+sb-on
+sb-off
+sb-restart
+```
+> 快捷命令会先检查程序是否已安装，未安装时会提示先运行默认安装。
 
 ## 🔁 sing-box 接入或恢复 WARP
 
