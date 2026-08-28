@@ -304,8 +304,15 @@ cp -p "$CONFIG" "/etc/sing-box/backups/config.json.before-warp-$(date +%Y%m%d_%H
 jq 'if any(.outbounds[]?; .tag == "warp") then . else .outbounds += [{"type":"socks","tag":"warp","server":"127.0.0.1","server_port":1080,"version":"5"}] end | .route.final = "warp"' "$CONFIG" > "$CONFIG.tmp"
 "$BIN" check -c "$CONFIG.tmp"
 mv "$CONFIG.tmp" "$CONFIG"
+mkdir -p /var/log/sing-box
 rc-service sing-box restart >/dev/null 2>&1 || rc-service sing-box start >/dev/null 2>&1
-echo "[✓] sing-box 已接入 WARP"
+sleep 1
+if rc-service sing-box status >/dev/null 2>&1 && pgrep -x sing-box >/dev/null 2>&1; then
+    echo "[✓] sing-box 已接入 WARP"
+else
+    echo "[✗] sing-box 启动失败，查看日志: tail -n 50 /var/log/sing-box/sing-box.log"
+    exit 1
+fi
 SBON
     chmod +x /usr/local/bin/sb-on
 
@@ -322,8 +329,15 @@ cp -p "$CONFIG" "/etc/sing-box/backups/config.json.before-direct-$(date +%Y%m%d_
 jq 'del(.outbounds[]? | select(.tag == "warp")) | if .route.final == "warp" then .route.final = "direct" else . end' "$CONFIG" > "$CONFIG.tmp"
 "$BIN" check -c "$CONFIG.tmp"
 mv "$CONFIG.tmp" "$CONFIG"
+mkdir -p /var/log/sing-box
 rc-service sing-box restart >/dev/null 2>&1 || rc-service sing-box start >/dev/null 2>&1
-echo "[✓] sing-box 已切换为直连"
+sleep 1
+if rc-service sing-box status >/dev/null 2>&1 && pgrep -x sing-box >/dev/null 2>&1; then
+    echo "[✓] sing-box 已切换为直连"
+else
+    echo "[✗] sing-box 启动失败，查看日志: tail -n 50 /var/log/sing-box/sing-box.log"
+    exit 1
+fi
 SBOFF
     chmod +x /usr/local/bin/sb-off
 
@@ -442,8 +456,15 @@ C=/etc/sing-box/config.json
 [ -x "$B" ] || { echo "[错误] sing-box 未安装"; exit 1; }
 [ -f "$C" ] || { echo "[错误] 配置不存在"; exit 1; }
 "$B" check -c "$C"
+mkdir -p /var/log/sing-box
 rc-service sing-box restart 2>/dev/null || rc-service sing-box start
-echo "[✓] sing-box 已重启"
+sleep 1
+if rc-service sing-box status >/dev/null 2>&1 && pgrep -x sing-box >/dev/null 2>&1; then
+    echo "[✓] sing-box 已重启"
+else
+    echo "[✗] sing-box 启动失败，查看日志: tail -n 50 /var/log/sing-box/sing-box.log"
+    exit 1
+fi
 SBR
     chmod +x /usr/local/bin/singbox-restart
 
