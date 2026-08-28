@@ -1,5 +1,7 @@
 #!/bin/sh
-set -euo pipefail
+set -eu
+# pipefail 在支持的 shell（Alpine ash/bash）下启用，不影响 dash
+(set -o pipefail) 2>/dev/null && set -o pipefail || true
 
 # ==========================================
 # warp-go + shadowquic 一键部署
