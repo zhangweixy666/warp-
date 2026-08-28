@@ -37,6 +37,10 @@ case "$ACTION" in
         [ -x /usr/local/bin/sb-off ] || { echo "[错误] sb-off 尚未安装，请先运行默认安装"; exit 1; }
         exec /usr/local/bin/sb-off
         ;;
+    sb-restart)
+        [ -x /usr/local/bin/sb-restart ] || { echo "[错误] sb-restart 尚未安装，请先运行默认安装"; exit 1; }
+        exec /usr/local/bin/sb-restart
+        ;;
     singbox-install|singbox-manager|singbox-status|singbox-restart|singbox-warp-on|singbox-warp-off|singbox-backup|singbox-restore|singbox-remove)
         [ -x "/usr/local/bin/$ACTION" ] || { echo "[错误] $ACTION 尚未安装，请先运行默认安装"; exit 1; }
         exec "/usr/local/bin/$ACTION"
@@ -70,7 +74,7 @@ case "$ACTION" in
         exit 0
         ;;
     *)
-        echo "用法: sh $0 [install|all|warp|quic|sb-on|sb-off|remove]"
+        echo "用法: sh $0 [install|all|warp|quic|sb-on|sb-off|sb-restart|remove]"
         echo "  install/all  安装 WARP + ShadowQuic（默认，与原版一致）"
         echo "  warp         仅安装 WARP（SOCKS5 127.0.0.1:1080）"
         echo "  quic         仅安装 ShadowQuic（UDP 1443）"
@@ -340,6 +344,25 @@ else
 fi
 SBOFF
     chmod +x /usr/local/bin/sb-off
+    cat > /usr/local/bin/sb-restart << 'SBRESTART'
+#!/bin/sh
+set -eu
+B=/usr/local/bin/sing-box
+C=/etc/sing-box/config.json
+[ -x "$B" ] || { echo "[错误] sing-box 未安装，请先运行 singbox-install"; exit 1; }
+[ -f "$C" ] || { echo "[错误] 未找到 $C"; exit 1; }
+"$B" check -c "$C"
+mkdir -p /var/log/sing-box
+rc-service sing-box restart 2>/dev/null || rc-service sing-box start
+sleep 1
+if rc-service sing-box status >/dev/null 2>&1 && pgrep -x sing-box >/dev/null 2>&1; then
+    echo "[✓] sing-box 已重启"
+else
+    echo "[✗] sing-box 启动失败，查看日志: tail -n 50 /var/log/sing-box/sing-box.log"
+    exit 1
+fi
+SBRESTART
+    chmod +x /usr/local/bin/sb-restart
 
     # 总管理面板
     cat > /usr/local/bin/warp-manager << 'WMANAGER'
