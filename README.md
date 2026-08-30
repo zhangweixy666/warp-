@@ -63,6 +63,8 @@ sh /root/install-warp-alpine.sh
 - ShadowQuic 默认账号：`user1`
 - ShadowQuic 默认密码：`changeme`
 
+> 配置保护：如果 `/etc/shadowquic/server-direct.yaml` 与 `server-socks.yaml` 已存在（例如重新安装或被其他项目共用），脚本会跳过配置覆盖，只补齐缺失的 `last-mode` 文件，已有部署不会被改动。
+
 ## 🎛️ 分模式安装
 不需要全部组件时，可以只装其中一项：
 安装 WARP + ShadowQuic（完整，默认）：
@@ -415,6 +417,15 @@ singbox-remove
 ```
 
 > `singbox-remove` 会保留 `/etc/sing-box/` 下的配置、证书和备份，便于后续恢复。
+
+## 📜 更新记录
+
+### 2026-08-30 脚本修订
+
+- 修复：`warpctl log` 日志路径错误，由不存在的 `/var/log/warp-go.log` 改为实际的 `/opt/warp-go/warp.log`。
+- 修复：`config_shadowquic` 不再无条件覆盖 `/etc/shadowquic/server-direct.yaml` 与 `server-socks.yaml`；检测到两份配置已存在时自动跳过（仅补齐缺失的 `last-mode` 文件），避免破坏已有部署或被其他项目共用的配置。
+- 修复：`remove` 卸载完成后的检查逻辑，文件未删净时改为输出警告而非误报成功。
+- 修复：脚本内 2 处乱码文案（“已停止”“没有备份目录”）。
 
 ## ⚠️ 使用须知
 
