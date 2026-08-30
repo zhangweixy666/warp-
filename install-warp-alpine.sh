@@ -62,13 +62,9 @@ case "$ACTION" in
             /usr/local/bin/warp-keepalive.sh
         rm -rf /etc/shadowquic /opt/warp-go
         (crontab -l 2>/dev/null | grep -v warp-keepalive | crontab -) 2>/dev/null || true
-        if [ -x /usr/local/bin/warp ]; then
-            echo "[✓] 已卸载 WARP"
-        fi
-        if [ -x /usr/local/bin/shadowquic ]; then
-            echo "[✓] 已卸载 ShadowQuic"
-        fi
-        if [ ! -x /usr/local/bin/warp ] && [ ! -x /usr/local/bin/shadowquic ]; then
+        if [ -x /usr/local/bin/warp ] || [ -x /usr/local/bin/shadowquic ]; then
+            echo "[!] 部分程序文件未能删除，请手动检查 /usr/local/bin/"
+        else
             echo "[✓] 已卸载 WARP + ShadowQuic"
         fi
         exit 0
@@ -172,6 +168,13 @@ install_shadowquic() {
 
 config_shadowquic() {
     mkdir -p /etc/shadowquic
+    # 已有完整配置时不覆盖（避免破坏现有部署或被其他项目接管的服务），
+    # 仅补齐缺失的 last-mode 文件。
+    if [ -f /etc/shadowquic/server-direct.yaml ] && [ -f /etc/shadowquic/server-socks.yaml ]; then
+        echo "[✓] ShadowQuic 配置已存在，跳过覆盖"
+        [ -f /etc/shadowquic/last-mode ] || echo "direct" > /etc/shadowquic/last-mode
+        return 0
+    fi
     cat > /etc/shadowquic/server-direct.yaml << 'YAML'
 inbound:
   type: shadowquic
@@ -220,7 +223,7 @@ outbound:
 log-level: info
 YAML
     echo "direct" > /etc/shadowquic/last-mode
-    echo "[✓] 配置创建完成"
+    echo "[✓] 配置创�a完成"
 }
 
 setup_service() {
@@ -288,7 +291,7 @@ case "${1:-status}" in
         curl -x socks5h://127.0.0.1:1080 -s --connect-timeout 5 https://ipv4.icanhazip.com
         ;;
     ip) curl -x socks5h://127.0.0.1:1080 -s --connect-timeout 5 https://ipv4.icanhazip.com 2>/dev/null || echo "不可用";;
-    log) tail -30 /var/log/warp-go.log 2>/dev/null || echo "无日志";;
+    log) tail -30 /opt/warp-go/warp.log 2>/dev/null || echo "无日志";;
     *) echo "用法: warpctl status|restart|ip|log";;
 esac
 CTL
@@ -510,7 +513,7 @@ SBB
 set -eu
 D=/etc/sing-box/backups
 C=/etc/sing-box/config.json
-[ -d "$D" ] || { echo "[错误] 没有备���目录"; exit 1; }
+[ -d "$D" ] || { echo "[错误] 没有备份目录"; exit 1; }
 B=$(ls -1t "$D"/config.json.* 2>/dev/null | head -1 || true)
 [ -n "$B" ] || { echo "[错误] 没有可恢复的备份"; exit 1; }
 cp -p "$C" "$C.before-restore.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
@@ -569,7 +572,7 @@ stop_all() {
 show_menu() {
     while true; do
         MODE=$(cat /etc/shadowquic/last-mode 2>/dev/null || echo "direct")
-        if pgrep -f 'shadowquic -c' >/dev/null 2>&1; then RUNNING="${GREEN}● 运行中${NC}"; else RUNNING="${RED}● 已��止${NC}"; fi
+        if pgrep -f 'shadowquic -c' >/dev/null 2>&1; then RUNNING="${GREEN}● 运行中${NC}"; else RUNNING="${RED}● 已停止${NC}"; fi
         clear
         echo -e "${BOLD}╔══════════════════════════════════════╗${NC}"
         echo -e "${BOLD}║        ShadowQuic 管理面板          ║${NC}"
@@ -593,7 +596,7 @@ show_menu() {
             2) stop_all; echo "socks" > /etc/shadowquic/last-mode; rc-service shadowquic start; sleep 2; echo -e "${GREEN}✓ 已切换${NC}"; read -p "按回车返回...";;
             3) stop_all; rc-service shadowquic start; sleep 2; echo -e "${GREEN}✓ 已重启${NC}"; read -p "按回车返回...";;
             4) stop_all; echo -e "${GREEN}✓ 已停止${NC}"; read -p "按回车返回...";;
-            5) tail -30 "/var/log/shadowquic-$(cat /etc/shadowquic/last-mode 2>/dev/null || echo direct).log" 2>/dev/null || echo "无日志"; read -p "按回��返回...";;
+            5) tail -30 "/var/log/shadowquic-$(cat /etc/shadowquic/last-mode 2>/dev/null || echo direct).log" 2>/dev/null || echo "无日志"; read -p "按回车返回...";;
             6) echo "  1) server-direct.yaml"; echo "  2) server-socks.yaml"; read -p "选择 [1-2]: " c; [ "$c" = "1" ] && nano /etc/shadowquic/server-direct.yaml; [ "$c" = "2" ] && nano /etc/shadowquic/server-socks.yaml; read -p "重启? [Y/n]: " ra; case "$ra" in n|N) ;; *) stop_all; rc-service shadowquic start; sleep 2; esac; read -p "按回车返回...";;
             7) echo "  1) 直连"; echo "  2) SOCKS5"; read -p "选择 [1-2]: " p; [ "$p" = "1" ] && nano /etc/shadowquic/server-direct.yaml; [ "$p" = "2" ] && nano /etc/shadowquic/server-socks.yaml; read -p "重启? [Y/n]: " ra2; case "$ra2" in n|N) ;; *) stop_all; rc-service shadowquic start; sleep 2; esac; read -p "按回车返回...";;
             0) echo -e "${GREEN}再见${NC}"; exit 0;;
