@@ -63,7 +63,7 @@ sh /root/install-warp-alpine.sh
 - ShadowQuic 默认账号：`user1`
 - ShadowQuic 默认密码：`changeme`
 
-> 配置保护：如果 `/etc/shadowquic/server-direct.yaml` 与 `server-socks.yaml` 已存在（例如重新安装或被其他项目共用），脚本会跳过配置覆盖，只补齐缺失的 `last-mode` 文件，已有部署不会被改动。
+> 配置保护：只要 `/etc/shadowquic/server-direct.yaml` 或 `server-socks.yaml` 任一文件存在（例如重新安装或被其他项目共用），脚本即视为已配置并跳过覆盖，只补齐缺失项，绝不改动已有文件。新生成的配置文件权限为 `600`（含凭据）。
 
 ## 🎛️ 分模式安装
 不需要全部组件时，可以只装其中一项：
@@ -417,8 +417,25 @@ singbox-remove
 ```
 
 > `singbox-remove` 会保留 `/etc/sing-box/` 下的配置、证书和备份，便于后续恢复。
+>
+> 卸载保护：`remove` 会检查 `/etc/shadowquic/.managed-by-warp-go` 标记。若该标记不存在，说明配置可能由其他项目（如 suoha-plus）创建，脚本会拒绝卸载并退出，避免误删他人配置。确认要卸载时先执行：
+> `touch /etc/shadowquic/.managed-by-warp-go`
 
 ## 📜 更新记录
+
+### 2026-08-31 脚本修订（Alpine 真机两轮全量实测）
+
+- 修复（高危）：移除脚本开头的 `set -o pipefail`。Alpine 的 busybox ash 支持 pipefail，它会让 `$(curl ... | grep ... | sed ...)` 中的管道失败直接触发 `set -e` 退出，导致 shadowquic 版本兜底与所有下载失败提示成为死代码——GitHub 不可达时脚本会静默消失。
+- 修复（高危）：`find_warp` / `install_shadowquic` / `singbox-install` 三处下载统一改为 `curl -fsSL --connect-timeout 5 --max-time 120` 并用 `if ! ...; then` 显式捕获失败，输出明确的网络诊断提示；同时区分「连不上」与「内容不是 ELF」两类错误。
+- 修复（高危）：`remove` 与 `switch-quic` / `quic-manager` 的 `stop_all` 不再 `pkill -f shadowquic`。同机若有其他项目（如 suoha-plus）共用 `/usr/local/bin/shadowquic` 二进制，旧逻辑会误杀其生产进程。现改为以 `/etc/shadowquic/.managed-by-warp-go` 标记判定归属，无标记则拒绝卸载、跳过 stop。
+- 修复：`start_shadowquic_checked` 改用 `rc-service status` + `/run/shadowquic.pid` 精确判定，不再用 `pgrep -f 'shadowquic -c'` 把外部进程误判为本服务启动成功。
+- 修复：`sb-on` / `sb-off` 写回 `config.json` 前先 `chmod 600`，避免 `jq > tmp` + `mv` 把含凭据的配置从 `600` 放宽为 `644`。
+- 修复：`config_shadowquic` 的保护条件由「两份配置都存在」改为「任一存在」，半损坏状态不再被覆盖；新建配置统一 `chmod 600`。
+- 修复：`setup_service` 与 shadowquic daemon 增加 `mkdir -p /var/log/shadowquic`，并将 `exec shadowquic` 改为绝对路径，避免日志目录缺失或服务环境 PATH 差异导致启动失败。
+- 修复：`singbox-install` 在离线时不再静默退出，改为输出下载失败原因（此前 `singbox-manager` 等所有子命令在断网时都会无提示失败）。
+- 修复：清理脚本中残留的一处无效 UTF-8 字节（第 226 行「配置创建完成」），此前会导致文件无法按 UTF-8 解码、终端输出乱码。
+- 变更：shadowquic 下载失败兜底版本由 `v0.3.12` 更新为 `v0.3.13`（当前上游最新 release）。
+- 新增：安装完成后输出默认凭据安全提示，提醒立即修改 `user1/changeme` 或在云安全组限制 UDP `1443` 来源。
 
 ### 2026-08-30 脚本修订
 

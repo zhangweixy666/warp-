@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
-# pipefail 在支持的 shell（Alpine ash/bash）下启用，不影响 dash
-(set -o pipefail) 2>/dev/null && set -o pipefail || true
+# 注意：不使用 pipefail。Alpine ash/busybox 支持 pipefail，
+# 它会让命令替换中的管道失败直接触发 set -e 退出，
+# 导致版本兜底、下载失败提示等容错分支永远执行不到。
 
 # ==========================================
 # warp-go + shadowquic 一键部署
@@ -46,6 +47,13 @@ case "$ACTION" in
         exec "/usr/local/bin/$ACTION"
         ;;
     remove|uninstall)
+        # 无管理标记说明配置可能属于其他项目（如 suoha-plus），拒绝删除避免误伤
+        if [ -d /etc/shadowquic ] && [ ! -f /etc/shadowquic/.managed-by-warp-go ]; then
+            echo "[!] /etc/shadowquic 未被本仓库管理（缺少 .managed-by-warp-go 标记）"
+            echo "    可能被其他项目接管，为避免误删他人配置，已取消卸载。"
+            echo "    确认要卸载请先执行: touch /etc/shadowquic/.managed-by-warp-go"
+            exit 1
+        fi
         rc-service shadowquic stop 2>/dev/null || true
         rc-service warp-go stop 2>/dev/null || true
         rc-update del shadowquic default 2>/dev/null || true
@@ -84,8 +92,7 @@ apk add --no-cache curl jq procps bash dialog nano >/dev/null 2>&1 || true
 WARP_DIR="/opt/warp-go"
 WARP_BIN="/usr/local/bin/warp"
 WARP_PORT=1080
-GITHUB_REPO="zhangweixy666/warp-"
-VER="v1"
+WARP_DL_URL="https://github.com/zhangweixy666/warp-/releases/download/v1/warp"
 
 # ---------- WARP ----------
 find_warp() {
@@ -98,11 +105,17 @@ find_warp() {
         fi
     done
     echo "[i] 下载 warp..."
-    curl -L -o /tmp/warp "https://github.com/${GITHUB_REPO}/releases/download/${VER}/warp" 2>/dev/null
-    if [ -f /tmp/warp ] && [ "$(head -c 4 /tmp/warp 2>/dev/null)" = "$(printf '\x7f\x45\x4c\x46')" ]; then
+    if ! curl -fsSL --connect-timeout 5 --max-time 120 -o /tmp/warp "$WARP_DL_URL" 2>/dev/null; then
+        echo "[✗] warp 下载失败：无法连接 $WARP_DL_URL"
+        echo "     请检查到 github.com 的连通性（DNS/网络），或手动将 warp 放到 /root/warp 后重试"
+        exit 1
+    fi
+    if [ "$(head -c 4 /tmp/warp 2>/dev/null)" = "$(printf '\x7f\x45\x4c\x46')" ]; then
         mv /tmp/warp "$WARP_BIN" && chmod +x "$WARP_BIN"; echo "[✓] warp 下载完成"
     else
-        echo "[✗] warp 下载失败"; exit 1
+        echo "[✗] warp 下载失败：下载内容不是有效的 ELF 可执行文件"
+        rm -f /tmp/warp
+        exit 1
     fi
 }
 
@@ -154,24 +167,31 @@ KEEP
 install_shadowquic() {
     if [ -f /usr/local/bin/shadowquic ]; then echo "[✓] shadowquic 已安装"; return 0; fi
     echo "[i] 获取最新版本..."
-    SQ_VER=$(curl -sL https://api.github.com/repos/spongebob888/shadowquic/releases/latest | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-    [ -z "$SQ_VER" ] && SQ_VER="v0.3.12"
+    SQ_VER=$(curl -sL --connect-timeout 5 --max-time 12 https://api.github.com/repos/spongebob888/shadowquic/releases/latest 2>/dev/null \
+        | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' || true)
+    [ -n "$SQ_VER" ] || SQ_VER="v0.3.13"
     echo "[i] 下载 shadowquic ${SQ_VER}..."
-    curl -L -o /tmp/shadowquic "https://github.com/spongebob888/shadowquic/releases/download/${SQ_VER}/shadowquic-x86_64-linux-musl" 2>/dev/null
-    if [ -f /tmp/shadowquic ] && [ "$(head -c 4 /tmp/shadowquic 2>/dev/null)" = "$(printf '\x7f\x45\x4c\x46')" ]; then
+    if ! curl -fsSL --connect-timeout 5 --max-time 120 -o /tmp/shadowquic "https://github.com/spongebob888/shadowquic/releases/download/${SQ_VER}/shadowquic-x86_64-linux-musl" 2>/dev/null; then
+        echo "[✗] shadowquic 下载失败：无法连接 github.com（版本 ${SQ_VER}）"
+        echo "     请检查网络连通性，或手动将 shadowquic 放到 /usr/local/bin/shadowquic 后重试"
+        exit 1
+    fi
+    if [ "$(head -c 4 /tmp/shadowquic 2>/dev/null)" = "$(printf '\x7f\x45\x4c\x46')" ]; then
         chmod +x /tmp/shadowquic; mv -f /tmp/shadowquic /usr/local/bin/shadowquic
         echo "[✓] shadowquic 安装完成"
     else
-        echo "[✗] shadowquic 下载失败"; exit 1
+        echo "[✗] shadowquic 下载失败：下载内容不是有效的 ELF 可执行文件"
+        rm -f /tmp/shadowquic
+        exit 1
     fi
 }
 
 config_shadowquic() {
     mkdir -p /etc/shadowquic
-    # 已有完整配置时不覆盖（避免破坏现有部署或被其他项目接管的服务），
-    # 仅补齐缺失的 last-mode 文件。
-    if [ -f /etc/shadowquic/server-direct.yaml ] && [ -f /etc/shadowquic/server-socks.yaml ]; then
-        echo "[✓] ShadowQuic 配置已存在，跳过覆盖"
+    # 已有配置时不覆盖（避免破坏现有部署或被其他项目接管的服务）。
+    # 任一配置文件存在即视为已配置，只补齐缺失项，绝不覆盖已有文件。
+    if [ -f /etc/shadowquic/server-direct.yaml ] || [ -f /etc/shadowquic/server-socks.yaml ]; then
+        echo "[✓] ShadowQuic 配置已存在，跳过覆盖（仅补齐缺失项）"
         [ -f /etc/shadowquic/last-mode ] || echo "direct" > /etc/shadowquic/last-mode
         return 0
     fi
@@ -223,10 +243,13 @@ outbound:
 log-level: info
 YAML
     echo "direct" > /etc/shadowquic/last-mode
-    echo "[✓] 配置创�a完成"
+    chmod 600 /etc/shadowquic/server-direct.yaml /etc/shadowquic/server-socks.yaml
+    touch /etc/shadowquic/.managed-by-warp-go
+    echo "[✓] 配置创建完成"
 }
 
 setup_service() {
+    mkdir -p /var/log/shadowquic
     cat > /etc/init.d/shadowquic << 'OPENRC'
 #!/sbin/openrc-run
 supervisor=supervise-daemon
@@ -247,7 +270,9 @@ OPENRC
 MODE=$(cat /etc/shadowquic/last-mode 2>/dev/null || echo "direct")
 CONF="/etc/shadowquic/server-${MODE}.yaml"
 LOG="/var/log/shadowquic-${MODE}.log"
-exec shadowquic -c "$CONF" >> "$LOG" 2>&1
+mkdir -p /var/log/shadowquic 2>/dev/null || true
+# 用绝对路径调用，避免服务环境 PATH 差异导致启动失败
+exec /usr/local/bin/shadowquic -c "$CONF" >> "$LOG" 2>&1
 DAEMON
     chmod +x /usr/local/bin/shadowquic-daemon.sh
 }
@@ -256,10 +281,13 @@ setup_quic_switch() {
     cat > /usr/local/bin/switch-quic << 'SWITCH'
 #!/bin/sh
 stop_all() {
-    rc-service shadowquic stop 2>/dev/null || true
-    pkill -9 -f '[/]usr/local/bin/shadowquic -c' 2>/dev/null || true
-    pkill -9 -f '[/]usr/local/bin/shadowquic-daemon.sh' 2>/dev/null || true
-    pkill -9 -f 'supervise-daemon shadowquic' 2>/dev/null || true
+    # 只操作本仓库管理的服务；不 pkill 外部进程
+    # （同机可能有其他项目共用 /usr/local/bin/shadowquic 二进制）
+    if [ -f /etc/shadowquic/.managed-by-warp-go ]; then
+        rc-service shadowquic stop 2>/dev/null || true
+    else
+        echo "[!] /etc/shadowquic 未被本仓库管理，跳过 stop（避免影响其他项目）"
+    fi
     sleep 2
 }
 case "${1:-}" in
@@ -310,6 +338,8 @@ mkdir -p /etc/sing-box/backups
 cp -p "$CONFIG" "/etc/sing-box/backups/config.json.before-warp-$(date +%Y%m%d_%H%M%S)"
 jq 'if any(.outbounds[]?; .tag == "warp") then . else .outbounds += [{"type":"socks","tag":"warp","server":"127.0.0.1","server_port":1080,"version":"5"}] end | .route.final = "warp"' "$CONFIG" > "$CONFIG.tmp"
 "$BIN" check -c "$CONFIG.tmp"
+# 保持 600：配置含凭据，直接 mv 会放宽为 644
+chmod 600 "$CONFIG.tmp" 2>/dev/null || true
 mv "$CONFIG.tmp" "$CONFIG"
 mkdir -p /var/log/sing-box
 rc-service sing-box restart >/dev/null 2>&1 || rc-service sing-box start >/dev/null 2>&1
@@ -335,6 +365,8 @@ mkdir -p /etc/sing-box/backups
 cp -p "$CONFIG" "/etc/sing-box/backups/config.json.before-direct-$(date +%Y%m%d_%H%M%S)"
 jq 'del(.outbounds[]? | select(.tag == "warp")) | if .route.final == "warp" then .route.final = "direct" else . end' "$CONFIG" > "$CONFIG.tmp"
 "$BIN" check -c "$CONFIG.tmp"
+# 保持 600：配置含凭据，直接 mv 会放宽为 644
+chmod 600 "$CONFIG.tmp" 2>/dev/null || true
 mv "$CONFIG.tmp" "$CONFIG"
 mkdir -p /var/log/sing-box
 rc-service sing-box restart >/dev/null 2>&1 || rc-service sing-box start >/dev/null 2>&1
@@ -425,7 +457,12 @@ U=https://raw.githubusercontent.com/zhangweixy666/-singbox1.3.x-vless-anytls/$MA
 TMP="$M.tmp.$$"
 trap 'rm -f "$TMP"' EXIT INT TERM
 echo "[i] 同步 sing-box 管理器固定版本: $MANAGER_REF"
-curl -fsSL "$U" -o "$TMP"
+if ! curl -fsSL --connect-timeout 5 --max-time 120 "$U" -o "$TMP" 2>/dev/null; then
+    rm -f "$TMP"
+    echo "[✗] sing-box 管理器下载失败：无法连接 $U"
+    echo "     请检查网络连通性后重试"
+    exit 1
+fi
 [ -s "$TMP" ] && head -n 1 "$TMP" | grep -q '^#!/bin/sh$' || { rm -f "$TMP"; echo "[✗] sing-box 管理器下载内容无效"; exit 1; }
 if [ ! -s "$M" ] || ! cmp -s "$TMP" "$M"; then
     mv "$TMP" "$M"
@@ -563,10 +600,13 @@ setup_quic_commands() {
 #!/bin/sh
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 stop_all() {
-    rc-service shadowquic stop 2>/dev/null || true
-    pkill -9 -f '[/]usr/local/bin/shadowquic -c' 2>/dev/null || true
-    pkill -9 -f '[/]usr/local/bin/shadowquic-daemon.sh' 2>/dev/null || true
-    pkill -9 -f 'supervise-daemon shadowquic' 2>/dev/null || true
+    # 只操作本仓库管理的服务；不 pkill 外部进程
+    # （同机可能有其他项目共用 /usr/local/bin/shadowquic 二进制）
+    if [ -f /etc/shadowquic/.managed-by-warp-go ]; then
+        rc-service shadowquic stop 2>/dev/null || true
+    else
+        echo "[!] /etc/shadowquic 未被本仓库管理，跳过 stop（避免影响其他项目）"
+    fi
     sleep 2
 }
 show_menu() {
@@ -660,10 +700,13 @@ esac
 start_shadowquic_checked() {
     rc-service shadowquic start 2>/dev/null || true
     sleep 2
-    if pgrep -f 'shadowquic -c' >/dev/null 2>&1; then
+    # 用服务状态 + pidfile 精确判断，避免把同机其他项目的 shadowquic 进程误判为本服务
+    if rc-service shadowquic status >/dev/null 2>&1 \
+       && [ -s /run/shadowquic.pid ] \
+       && kill -0 "$(cat /run/shadowquic.pid 2>/dev/null)" 2>/dev/null; then
         echo "[✓] ShadowQuic 启动成功"
     else
-        echo "[✗] ShadowQuic 启动失败，请检查日志"
+        echo "[✗] ShadowQuic 启动失败，请检查日志: tail -n 50 /var/log/shadowquic-service.log"
     fi
 }
 case "$ACTION" in
@@ -677,6 +720,13 @@ case "$ACTION" in
         ;;
 esac
 
+# 安全提示：默认凭据
+if [ "$ACTION" = "all" ] || [ "$ACTION" = "quic" ]; then
+    echo ""
+    echo "[安全提示] ShadowQuic 默认用户名/密码为 user1/changeme，"
+    echo "           请立即用 quic-manager 菜单「修改用户名密码」修改，"
+    echo "           或在云安全组限制 UDP 1443 来源 IP。"
+fi
 if [ "$ACTION" = "warp" ]; then
     echo ""
     echo "========================================"
