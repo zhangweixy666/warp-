@@ -36,6 +36,8 @@ sing-box 作为可选模块提供，需要时再安装，不改变默认 WARP + 
 
 ### 1. 下载并赋予执行权限
 
+> 仓库只包含脚本与源码归档，`warp` 二进制由安装脚本从 GitHub Releases 自动下载，无需手动准备。
+
 下载脚本：
 
 ```bash
@@ -423,6 +425,13 @@ singbox-remove
 
 ## 📜 更新记录
 
+### 2026-09-01 仓库卫生与许可证补全
+
+- 变更：移除仓库工作区内的 `warp` 二进制副本（8.5 MB，与 Release `v1` 资产 md5 `888578cc6f56dfe94ad04625ca371e4b` 完全一致）。安装脚本本就通过 Release 下载该文件，仓库内副本属纯冗余，且存在与 Release 漂移的风险。
+- 变更：源码包 `warp-go-src-20260726-fixed.tar.gz` 内补入 `LICENSE`（MIT 全文）与 `UPSTREAM-NOTES.md`（第三方依赖许可证清单），并为 4 个 `.go` 文件添加 SPDX 版权头，修复「仓库声明 MIT 但源码包内无许可证文件」的合规缺口。
+- 变更：`.gitignore` 由 C/C++/CMake/vcpkg 模板改写为匹配本仓库形态的规则（备份与临时产物、日志、`/warp` 构建产物、Go 构建产物）。
+- 文档：新增「源码与构建」章节，明确源码归档位置、构建命令与二进制分发方式；补全 License 章节。
+
 ### 2026-08-31 脚本修订（Alpine 真机两轮全量实测）
 
 - 修复（高危）：移除脚本开头的 `set -o pipefail`。Alpine 的 busybox ash 支持 pipefail，它会让 `$(curl ... | grep ... | sed ...)` 中的管道失败直接触发 `set -e` 退出，导致 shadowquic 版本兜底与所有下载失败提示成为死代码——GitHub 不可达时脚本会静默消失。
@@ -461,6 +470,35 @@ singbox-remove
 - [ShadowQuic](https://github.com/spongebob888/shadowquic)
 - [edgetunnel](https://github.com/cmliu/edgetunnel)
 
+## 📦 源码与构建
+
+`warp-go-src-20260726-fixed.tar.gz` 是 `warp` 可执行文件的完整 Go 源码归档，内含：
+
+| 文件 | 说明 |
+| --- | --- |
+| `main.go`、`tunnel/`、`registration/` | MASQUE 隧道与 WARP 注册实现 |
+| `docs/warp-masque-reverse-engineering.md` | 协议逆向分析文档 |
+| `LICENSE` | MIT 许可证全文 |
+| `UPSTREAM-NOTES.md` | 第三方依赖与许可证声明 |
+
+自行构建：
+
+```bash
+tar xzf warp-go-src-20260726-fixed.tar.gz
+cd warp-go
+go build -trimpath -ldflags='-s -w' -o warp .
+```
+
+预编译的 `warp` 二进制通过 [GitHub Releases](https://github.com/zhangweixy666/warp-/releases) 分发，
+安装脚本会自动下载（本地已有 `/usr/local/bin/warp`、`/root/warp`、`/home/warp`、`/tmp/warp` 时优先复用），
+仓库工作区不再携带二进制副本。
+
 ## 📄 License
 
-请在使用和再分发前确认相关上游项目的许可证及条款。
+本仓库的 Shell 脚本与 `warp-go` 源码采用 **MIT License**（© 2026 zhangweixy666），
+全文见 [`LICENSE`](LICENSE) 以及源码包内的 `warp-go/LICENSE`。
+
+- 本项目是对 Cloudflare WARP MASQUE 协议的独立逆向实现，不包含 Cloudflare 官方源代码或二进制文件。
+- Go 依赖以 module 方式引入，各自保留上游许可证（`quic-go`、`qpack` 为 MIT；`golang.org/x/*` 为 BSD-3-Clause），清单见源码包内 `UPSTREAM-NOTES.md`。
+- 运行时下载的第三方组件（ShadowQuic、sing-box、cloudflared）分别受其自身许可证约束。
+- 使用和再分发前，请确认符合所在地法律法规及 Cloudflare 服务条款。

@@ -1,69 +1,33 @@
-# Prerequisites
-*.d
+# 本仓库为 Shell 部署脚本 + Go 源码包，不使用 C/C++ 构建产物忽略规则。
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-*.so.*
-
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# Build directories
-build/
-Build/
-build-*/
-
-# CMake generated files
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-install_manifest.txt
-compile_commands.json
-
-# Temporary files
-*.tmp
-*.log
+# ---- 备份与临时文件（脚本运行时会产生 .orig / .system / .bak / .tmp）----
+*.orig
+*.system
 *.bak
+*.tmp
 *.swp
+*~
 
-# vcpkg
-vcpkg_installed/
+# ---- 日志与测试产物 ----
+*.log
+nohup.out
+/test-work/
+/tests/output/
 
-# debug information files
-*.dwo
+# ---- 下载/构建产物：warp 二进制由 GitHub Release 分发，不入库 ----
+# 见 README「安装」章节；脚本会从 Release 下载，仓库内不再携带副本。
+/warp
+/warp-go
+shadowquic
+shadowquic-*
 
-# test output & cache
-Testing/
-.cache/
+# ---- Go 构建产物（源码以 tar.gz 形式归档，若日后直接入库则有用）----
+*.exe
+*.test
+*.out
+/vendor/
+
+# ---- 编辑器与系统 ----
+.idea/
+.vscode/
+.DS_Store
