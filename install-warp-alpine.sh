@@ -93,6 +93,9 @@ WARP_DIR="/opt/warp-go"
 WARP_BIN="/usr/local/bin/warp"
 WARP_PORT=1080
 WARP_DL_URL="https://github.com/zhangweixy666/warp-/releases/download/v1/warp"
+# sing-box 管理器同步源，默认跟随上游 main 分支。
+# 必须 export：singbox-install 是独立脚本，靠环境变量继承才能拿到钉版本值。
+export SINGBOX_MANAGER_REF="${SINGBOX_MANAGER_REF:-main}"
 
 # ---------- WARP ----------
 find_warp() {
@@ -451,26 +454,41 @@ setup_singbox_commands() {
 #!/bin/sh
 set -eu
 M=/usr/local/bin/singbox-manager.sh
-# 固定使用第二个仓库的已验证提交；不追踪 sing-box 或管理脚本的最新版本。
-MANAGER_REF=432141cb5690e932f62b2380aa6dd8d045bfc5be
-U=https://raw.githubusercontent.com/zhangweixy666/-singbox1.3.x-vless-anytls/$MANAGER_REF/singbox-manager.sh
+# 自动同步上游仓库最新版：默认跟随 main 分支。
+# 需要钉住版本时：SINGBOX_MANAGER_REF=<commit-sha> singbox-install
+MANAGER_REF="${SINGBOX_MANAGER_REF:-main}"
+REPO=zhangweixy666/-singbox1.3.x-vless-anytls
+U=https://raw.githubusercontent.com/$REPO/$MANAGER_REF/singbox-manager.sh
 TMP="$M.tmp.$$"
 trap 'rm -f "$TMP"' EXIT INT TERM
-echo "[i] 同步 sing-box 管理器固定版本: $MANAGER_REF"
+echo "[i] 同步 sing-box 管理器（$REPO @ $MANAGER_REF）..."
 if ! curl -fsSL --connect-timeout 5 --max-time 120 "$U" -o "$TMP" 2>/dev/null; then
     rm -f "$TMP"
-    echo "[✗] sing-box 管理器下载失败：无法连接 $U"
-    echo "     请检查网络连通性后重试"
-    exit 1
-fi
-[ -s "$TMP" ] && head -n 1 "$TMP" | grep -q '^#!/bin/sh$' || { rm -f "$TMP"; echo "[✗] sing-box 管理器下载内容无效"; exit 1; }
-if [ ! -s "$M" ] || ! cmp -s "$TMP" "$M"; then
-    mv "$TMP" "$M"
-    chmod 755 "$M"
-    echo "[✓] sing-box 管理器已同步"
+    if [ -x "$M" ]; then
+        echo "[!] 同步失败：无法连接 $U"
+        echo "    继续使用本地已有版本：$M"
+    else
+        echo "[✗] 同步失败：无法连接 $U"
+        echo "    且本地无可用管理器，请检查网络连通性后重试"
+        exit 1
+    fi
 else
-    rm -f "$TMP"
-    echo "[✓] sing-box 管理器已是固定版本"
+    if [ ! -s "$TMP" ] || ! head -n 1 "$TMP" | grep -q '^#!/bin/sh$'; then
+        rm -f "$TMP"
+        if [ -x "$M" ]; then
+            echo "[!] 下载内容无效（不是 #!/bin/sh 脚本），继续使用本地已有版本"
+        else
+            echo "[✗] 下载内容无效：$U 返回的不是 sing-box 管理器脚本"
+            exit 1
+        fi
+    elif [ ! -s "$M" ] || ! cmp -s "$TMP" "$M"; then
+        mv "$TMP" "$M"
+        chmod 755 "$M"
+        echo "[✓] sing-box 管理器已更新到最新版"
+    else
+        rm -f "$TMP"
+        echo "[✓] sing-box 管理器已是最新版"
+    fi
 fi
 if [ -x /usr/local/bin/sing-box ]; then
     echo "[✓] sing-box 已安装"
@@ -486,8 +504,13 @@ SBI
 #!/bin/sh
 set -eu
 M=/usr/local/bin/singbox-manager.sh
-# 每次调用先同步固定管理脚本；不会因为同步而更新已有 sing-box 二进制。
+# 每次调用先同步上游最新版管理脚本；不会因为同步而更新已有 sing-box 二进制。
+# 同步失败时 singbox-install 会保留本地版本并继续，因此这里不阻断原命令。
 /usr/local/bin/singbox-install
+if [ ! -x "$M" ]; then
+    echo "[✗] 管理器不存在，无法执行: $M" >&2
+    exit 1
+fi
 exec "$M" "$@"
 SBM
     chmod +x /usr/local/bin/singbox-manager

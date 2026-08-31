@@ -182,6 +182,22 @@ sh /root/install-warp-alpine.sh singbox-install
 
 > 这一步只安装程序，不会自动创建节点配置。
 
+管理器脚本（`singbox-manager.sh`）来自仓库 [`zhangweixy666/-singbox1.3.x-vless-anytls`](https://github.com/zhangweixy666/-singbox1.3.x-vless-anytls)，
+**默认自动跟随该仓库 `main` 分支最新版**：`singbox-install` 与 `singbox-manager` 每次执行都会先比对并同步，
+已是最新则跳过写入；同步失败（断网/上游不可达）时保留本地已有版本继续运行，不会中断命令。
+
+需要钉住版本（例如生产环境不希望上游变更自动生效）时，用环境变量指定引用：
+
+```bash
+# 钉到具体 commit
+SINGBOX_MANAGER_REF=432141cb5690e932f62b2380aa6dd8d045bfc5be singbox-install
+
+# 钉到 tag 或分支
+SINGBOX_MANAGER_REF=v1.2.4 singbox-install
+```
+
+> 同步只更新管理器脚本本身，**不会**自动升级已安装的 sing-box 二进制（仍由 `singbox-manager` 的 install/upgrade 控制）。
+
 ### 2. 创建第一个节点
 
 交互式配置 VLESS + WebSocket：
@@ -424,6 +440,14 @@ singbox-remove
 > `touch /etc/shadowquic/.managed-by-warp-go`
 
 ## 📜 更新记录
+
+### 2026-09-01 sing-box 管理器改为自动同步上游最新版
+
+- 变更：`singbox-install` 不再钉住固定 commit（原 `432141cb…`，已落后上游），改为默认跟随 `-singbox1.3.x-vless-anytls` 仓库 `main` 分支最新版，并在每次 `singbox-manager` 调用时自动比对同步。
+- 新增：`SINGBOX_MANAGER_REF` 环境变量，可钉住到任意 commit / tag / 分支，用于生产环境隔离上游变更。
+- 修复：同步失败时的行为区分两种情况——本地已有管理器则保留并继续（仅告警），本地无管理器才报错退出；避免上游临时不可达导致所有 `singbox-*` 命令集体失败。
+- 修复：`singbox-manager` 包装脚本在同步后校验 `$M` 可执行，避免管理器缺失时 `exec` 报出难以理解的错误。
+- 清理：删除 Release `v1` 中过时的 `install-warp-alpine.sh` 资产（5832 字节，为修复前旧版，与仓库内容不一致易误导）。
 
 ### 2026-09-01 仓库卫生与许可证补全
 
