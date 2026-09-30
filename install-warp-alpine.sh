@@ -167,25 +167,136 @@ KEEP
 }
 
 # ---------- shadowquic ----------
-install_shadowquic() {
-    if [ -f /usr/local/bin/shadowquic ]; then echo "[✓] shadowquic 已安装"; return 0; fi
-    echo "[i] 获取最新版本..."
-    SQ_VER=$(curl -sL --connect-timeout 5 --max-time 12 https://api.github.com/repos/spongebob888/shadowquic/releases/latest 2>/dev/null \
+# 获取 shadowquic 官方最新 release tag：优先 GitHub API，失败时回退到 releases/latest 的 302 重定向。
+fetch_shadowquic_version() {
+    _v=$(curl -sL --connect-timeout 5 --max-time 12 https://api.github.com/repos/spongebob888/shadowquic/releases/latest 2>/dev/null \
         | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' || true)
-    [ -n "$SQ_VER" ] || SQ_VER="v0.3.13"
-    echo "[i] 下载 shadowquic ${SQ_VER}..."
-    if ! curl -fsSL --connect-timeout 5 --max-time 120 -o /tmp/shadowquic "https://github.com/spongebob888/shadowquic/releases/download/${SQ_VER}/shadowquic-x86_64-linux-musl" 2>/dev/null; then
-        echo "[✗] shadowquic 下载失败：无法连接 github.com（版本 ${SQ_VER}）"
-        echo "     请检查网络连通性，或手动将 shadowquic 放到 /usr/local/bin/shadowquic 后重试"
+    if [ -z "$_v" ]; then
+        _v=$(curl -s -o /dev/null -w '%{redirect_url}' --connect-timeout 5 --max-time 12 \
+            https://github.com/spongebob888/shadowquic/releases/latest 2>/dev/null \
+            | sed -n 's#.*/tag/##p' || true)
+    fi
+    printf '%s' "$_v"
+}
+
+# 读取已安装的 shadowquic 版本号（如 0.4.0）；未安装时输出为空。
+installed_shadowquic_version() {
+    [ -x /usr/local/bin/shadowquic ] || return 0
+    /usr/local/bin/shadowquic --version 2>&1 | sed -n 's/.*[^0-9]\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1
+}
+
+# 自动拉取官方最新版并覆盖当前版本（已是最新则跳过，保持幂等）。
+# 钉住版本：SHADOWQUIC_VERSION=v0.3.13 sh $0 quic
+# 强制重装：SHADOWQUIC_FORCE=1 sh $0 quic
+install_shadowquic() {
+    SQ_TARGET="${SHADOWQUIC_VERSION:-}"
+    if [ -n "$SQ_TARGET" ]; then
+        case "$SQ_TARGET" in v*) ;; *) SQ_TARGET="v$SQ_TARGET" ;; esac
+    else
+        echo "[i] 获取 shadowquic 官方最新版本..."
+        SQ_TARGET=$(fetch_shadowquic_version)
+    fi
+
+    SQ_CUR=$(installed_shadowquic_version)
+    if [ -z "$SQ_TARGET" ]; then
+        # 拿不到官方版本信息：不猜测、不降级；已有版本则保留，全新安装才用兜底版本
+        if [ -n "$SQ_CUR" ]; then
+            echo "[!] 无法获取官方最新版本信息（请检查到 github.com / api.github.com 的连通性）"
+            echo "    保留当前版本 $SQ_CUR，未做任何改动"
+            return 0
+        fi
+        SQ_TARGET="v0.4.0"
+    fi
+
+    if [ -n "$SQ_CUR" ] && [ "${SQ_TARGET#v}" = "$SQ_CUR" ] && [ "${SHADOWQUIC_FORCE:-0}" != "1" ]; then
+        echo "[✓] shadowquic 已是最新版 $SQ_CUR（跳过重装）"
+        return 0
+    fi
+
+    SQ_ASSET="shadowquic-x86_64-linux-musl"
+    SQ_URL="https://github.com/spongebob888/shadowquic/releases/download/${SQ_TARGET}/${SQ_ASSET}"
+    if [ -n "$SQ_CUR" ]; then
+        echo "[i] shadowquic $SQ_CUR -> ${SQ_TARGET#v}，正在下载覆盖..."
+    else
+        echo "[i] 下载安装 shadowquic ${SQ_TARGET}..."
+    fi
+
+    SQ_TMP="/tmp/shadowquic.$$"
+    SQ_CODE=$(curl -sL --connect-timeout 5 --max-time 300 -w '%{http_code}' -o "$SQ_TMP" "$SQ_URL" 2>/dev/null || true)
+    if [ "$SQ_CODE" != "200" ]; then
+        rm -f "$SQ_TMP"
+        case "$SQ_CODE" in
+            404)
+                echo "[✗] shadowquic 版本 ${SQ_TARGET} 不存在：官方 release 没有该版本（HTTP 404）"
+                echo "     请检查 SHADOWQUIC_VERSION 指定的版本号是否正确"
+                ;;
+            *)
+                echo "[✗] shadowquic 下载失败：无法连接 github.com（版本 ${SQ_TARGET}，HTTP ${SQ_CODE:-无响应}）"
+                echo "     请检查到 github.com 的连通性（DNS/网络），或手动将 shadowquic 放到 /usr/local/bin/shadowquic 后重试"
+                ;;
+        esac
+        if [ -n "$SQ_CUR" ]; then
+            echo "[!] 已保留当前可用版本：$SQ_CUR（未受影响）"
+        fi
         exit 1
     fi
-    if [ "$(head -c 4 /tmp/shadowquic 2>/dev/null)" = "$(printf '\x7f\x45\x4c\x46')" ]; then
-        chmod +x /tmp/shadowquic; mv -f /tmp/shadowquic /usr/local/bin/shadowquic
-        echo "[✓] shadowquic 安装完成"
-    else
-        echo "[✗] shadowquic 下载失败：下载内容不是有效的 ELF 可执行文件"
-        rm -f /tmp/shadowquic
+
+    if [ ! -s "$SQ_TMP" ] || [ "$(head -c 4 "$SQ_TMP" 2>/dev/null)" != "$(printf '\x7f\x45\x4c\x46')" ]; then
+        echo "[✗] shadowquic 下载内容无效：不是 ELF 可执行文件（版本 ${SQ_TARGET}）"
+        rm -f "$SQ_TMP"
         exit 1
+    fi
+
+    # 官方 release API 提供 sha256 摘要时做完整性校验（拿不到摘要则跳过，不假装校验过）
+    if command -v sha256sum >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        SQ_SHA=$(curl -sL --connect-timeout 5 --max-time 12 "https://api.github.com/repos/spongebob888/shadowquic/releases/tags/${SQ_TARGET}" 2>/dev/null \
+            | jq -r --arg n "$SQ_ASSET" '.assets[]? | select(.name==$n) | (.digest // "")' 2>/dev/null | sed -n 's/^sha256://p' | head -1 || true)
+        if [ -n "$SQ_SHA" ]; then
+            SQ_GOT=$(sha256sum "$SQ_TMP" | awk '{print $1}' || true)
+            if [ "$SQ_GOT" != "$SQ_SHA" ]; then
+                echo "[✗] shadowquic SHA-256 校验失败：下载内容与官方摘要不一致"
+                echo "     期望 $SQ_SHA"
+                echo "     实际 $SQ_GOT"
+                rm -f "$SQ_TMP"
+                exit 1
+            fi
+            echo "[✓] SHA-256 校验通过"
+        fi
+    fi
+
+    # 覆盖前备份旧版，便于回滚（备份名含时间戳）
+    if [ -x /usr/local/bin/shadowquic ]; then
+        cp -a /usr/local/bin/shadowquic "/usr/local/bin/shadowquic.bak-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+    fi
+
+    chmod 755 "$SQ_TMP"
+    mv -f "$SQ_TMP" /usr/local/bin/shadowquic
+
+    # 覆盖后回读版本号二次确认，防止“替换成功但未生效”的假成功
+    SQ_NEW=$(installed_shadowquic_version)
+    if [ "${SQ_TARGET#v}" != "$SQ_NEW" ]; then
+        echo "[✗] shadowquic 版本确认失败：期望 ${SQ_TARGET#v}，实际 ${SQ_NEW:-未知}"
+        echo "     请检查 /usr/local/bin 下是否还有其他 shadowquic 副本"
+        exit 1
+    fi
+
+    if [ -n "$SQ_CUR" ]; then
+        echo "[✓] shadowquic 已更新：$SQ_CUR -> $SQ_NEW"
+    else
+        echo "[✓] shadowquic 安装完成（$SQ_NEW）"
+    fi
+
+    # 正在运行的服务需重启才能加载新二进制；
+    # 只有本仓库部署的服务（daemon 指向 shadowquic-daemon.sh 或带管理标记）才自动重启，
+    # 避免重启被其他项目接管的同名服务。
+    if [ -f /etc/init.d/shadowquic ] && rc-service shadowquic status >/dev/null 2>&1; then
+        if grep -q 'shadowquic-daemon\.sh' /etc/init.d/shadowquic 2>/dev/null \
+           || [ -f /etc/shadowquic/.managed-by-warp-go ]; then
+            rc-service shadowquic restart >/dev/null 2>&1 || true
+            echo "[✓] 已重启 ShadowQuic 服务以加载新版本"
+        else
+            echo "[i] 提示：服务正在运行，重启后新版本才生效：rc-service shadowquic restart"
+        fi
     fi
 }
 

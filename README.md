@@ -66,6 +66,7 @@ sh /root/install-warp-alpine.sh
 - ShadowQuic 默认密码：`changeme`
 
 > 配置保护：只要 `/etc/shadowquic/server-direct.yaml` 或 `server-socks.yaml` 任一文件存在（例如重新安装或被其他项目共用），脚本即视为已配置并跳过覆盖，只补齐缺失项，绝不改动已有文件。新生成的配置文件权限为 `600`（含凭据）。
+> 版本管理：安装 shadowquic 时会自动向官方仓库 `spongebob888/shadowquic` 查询最新 release 并覆盖当前版本，已是最新则跳过；下载后做 SHA-256 校验，覆盖前自动备份旧版到 `/usr/local/bin/shadowquic.bak-<时间戳>`。需要钉住版本或不希望跟随上游变更时：`SHADOWQUIC_VERSION=v0.3.13 sh install-warp-alpine.sh quic`；强制重装：`SHADOWQUIC_FORCE=1 sh install-warp-alpine.sh quic`。
 
 ## 🎛️ 分模式安装
 不需要全部组件时，可以只装其中一项：
@@ -440,6 +441,19 @@ singbox-remove
 > `touch /etc/shadowquic/.managed-by-warp-go`
 
 ## 📜 更新记录
+
+### 2026-10-01 ShadowQuic 改为自动跟随官方最新版并覆盖升级
+
+- 变更：`install_shadowquic` 不再「已安装就跳过」，改为默认向官方仓库 `spongebob888/shadowquic` 拉取最新 release 并覆盖现有二进制（0.3.12 → 0.4.0 真机实测通过）。
+- 新增：安装前读取本地版本号并与官方 tag 比对，**已是同版本时跳过重装**，保持重复执行幂等。
+- 新增：版本号获取双通道——优先 GitHub API，失败时回退到 `releases/latest` 的 302 重定向，避免单一 API 限流导致拿不到版本。
+- 新增：下载内容做 **SHA-256 完整性校验**（比对官方 release API 的 `digest` 字段），不一致则拒绝安装。
+- 新增：覆盖前自动备份旧二进制到 `/usr/local/bin/shadowquic.bak-<时间戳>`，便于回滚。
+- 新增：覆盖后**回读版本号二次确认**，防止「替换成功但未生效」的假成功（同名多副本场景）。
+- 新增：服务正在运行且确属本仓库部署时自动重启以加载新版本；无法确认归属时仅提示，不擅自重启他人服务。
+- 新增：环境变量 `SHADOWQUIC_VERSION=<tag>` 可钉住版本（如 `v0.3.13`），`SHADOWQUIC_FORCE=1` 可强制重装。
+- 修复：下载失败按 HTTP 状态码精确诊断——`404` 提示「该版本不存在」，其他情况才提示网络连通性问题，不再把版本错误误报为断网。
+- 修复：断网时保留当前可用版本且命令整体不再中断（EXIT=0），全新安装才在拿不到版本信息时使用兜底版本。
 
 ### 2026-09-01 sing-box 管理器改为自动同步上游最新版
 
