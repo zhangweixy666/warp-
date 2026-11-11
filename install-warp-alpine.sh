@@ -310,51 +310,85 @@ config_shadowquic() {
         return 0
     fi
     cat > /etc/shadowquic/server-direct.yaml << 'YAML'
-inbound:
-  type: shadowquic
-  bind-addr: "[::]:1443"
-  users:
-    - username: "user1"
-      password: "changeme"
-  server-name: "www.apple.com"
-  jls-upstream:
-    addr: "www.apple.com:443"
-    rate-limit: 1000000
-  alpn: ["h3"]
-  zero-rtt: true
-  congestion-control: bbr
-  gso: true
-  mtu-discovery: true
-  blackhole-detection: false
-  initial-mtu: 1300
-  min-mtu: 1200
-outbound:
-  type: direct
-log-level: info
+# ShadowQuic v0.4.x 服务端配置（直连出站）
+# 字段结构与官方 0.4.x 一致；双文件由 last-mode 切换，文件名勿改
+inbounds:
+  - tag: sq-in
+    type: shadowquic
+    bind-addr: "[::]:1443"
+    default-outbound: direct-out
+    users:
+      - username: "user1"
+        password: "changeme"
+    # 伪装域名：微软 / Akamai，非 Cloudflare 托管，且真实提供 HTTP/3
+    server-name: "www.bing.com"
+    jls-upstream:
+      addr: "www.bing.com:443"
+      rate-limit: 10000000
+    alpn: ["h3"]
+    zero-rtt: true
+    congestion-control: bbr
+    gso: true
+    mtu-discovery: true
+    # 保留黑洞检测但提高阈值，避免丢包网络误判；min-mtu 取 QUIC 安全下限
+    blackhole-detection: true
+    blackhole-threshold: 30
+    initial-mtu: 1400
+    min-mtu: 1200
+    # 小内存机（128MB 级）限制缓冲，默认 1000 流 x 5MB 会 OOM
+    max-concurrent-bidi-streams: 100
+    max-concurrent-uni-streams: 100
+    stream-receive-window: 1048576
+    receive-window: 8388608
+    send-window: 8388608
+outbounds:
+  - tag: direct-out
+    type: direct
+    dns-strategy: prefer-ipv4
+    tcp-keep-alive: true
+router:
+  default-outbound: direct-out
+log-level: warn
 YAML
     cat > /etc/shadowquic/server-socks.yaml << 'YAML'
-inbound:
-  type: shadowquic
-  bind-addr: "[::]:1443"
-  users:
-    - username: "user1"
-      password: "changeme"
-  server-name: "www.apple.com"
-  jls-upstream:
-    addr: "www.apple.com:443"
-    rate-limit: 1000000
-  alpn: ["h3"]
-  zero-rtt: true
-  congestion-control: bbr
-  gso: true
-  mtu-discovery: true
-  blackhole-detection: false
-  initial-mtu: 1300
-  min-mtu: 1200
-outbound:
-  type: socks
-  addr: "127.0.0.1:1080"
-log-level: info
+# ShadowQuic v0.4.x 服务端配置（经 WARP SOCKS5 出站）
+# 字段结构与官方 0.4.x 一致；双文件由 last-mode 切换，文件名勿改
+inbounds:
+  - tag: sq-in
+    type: shadowquic
+    bind-addr: "[::]:1443"
+    default-outbound: warp-out
+    users:
+      - username: "user1"
+        password: "changeme"
+    # 伪装域名：微软 / Akamai，非 Cloudflare 托管，且真实提供 HTTP/3
+    server-name: "www.bing.com"
+    jls-upstream:
+      addr: "www.bing.com:443"
+      rate-limit: 10000000
+    alpn: ["h3"]
+    zero-rtt: true
+    congestion-control: bbr
+    gso: true
+    mtu-discovery: true
+    # 保留黑洞检测但提高阈值，避免丢包网络误判；min-mtu 取 QUIC 安全下限
+    blackhole-detection: true
+    blackhole-threshold: 30
+    initial-mtu: 1400
+    min-mtu: 1200
+    # 小内存机（128MB 级）限制缓冲，默认 1000 流 x 5MB 会 OOM
+    max-concurrent-bidi-streams: 100
+    max-concurrent-uni-streams: 100
+    stream-receive-window: 1048576
+    receive-window: 8388608
+    send-window: 8388608
+outbounds:
+  - tag: warp-out
+    type: socks
+    addr: "127.0.0.1:1080"
+router:
+  default-outbound: warp-out
+log-level: warn
 YAML
     echo "direct" > /etc/shadowquic/last-mode
     chmod 600 /etc/shadowquic/server-direct.yaml /etc/shadowquic/server-socks.yaml
