@@ -67,6 +67,42 @@ sh /root/install-warp-alpine.sh
 > 🔒 WARP 的 `1080` 默认**只监听回环**，不要把它暴露到公网。
 > 📦 `warp` 二进制由安装脚本从 GitHub Releases 自动下载，仓库不携带二进制副本。
 
+### ShadowQuic 节点默认参数
+
+生成的两份配置（`server-direct.yaml` / `server-socks.yaml`）除出站外参数一致，均按 ShadowQuic `0.4.x` 的**列表式 schema** 编写：
+
+| 参数 | 值 | 说明 |
+|:---|:---|:---|
+| `bind-addr` | `[::]:1443` | 双栈监听 UDP 1443 |
+| `server-name` / `jls-upstream` | `www.bing.com` | 伪装域名。选微软/Akamai 自有基础设施、**非 Cloudflare 托管**，且该域名真实提供 HTTP/3，主动探测不会穿帮 |
+| `jls-upstream.rate-limit` | `10000000` | 仅限制**未通过 JLS 认证的转发流量**（即探测者那条路），不影响代理吞吐 |
+| `alpn` | `["h3"]` | 必须与伪装域名真实支持的协议一致 |
+| `zero-rtt` | `true` | QUIC 0-RTT 首包即数据 |
+| `congestion-control` | `bbr` | `bbr3` 在 0.4.x 尚未实现，写了会 warn 并回退 BBR |
+| `initial-mtu` / `min-mtu` | `1400` / `1200` | `min-mtu` 取 QUIC 安全下限；设成 1380 这类高值会在 PPPoE/隧道/移动网下黑洞 |
+| `mtu-discovery` | `true` | 实测可从 1400 自动探测升到 1426 |
+| `blackhole-detection` / `blackhole-threshold` | `true` / `30` | 保留黑洞检测但提高阈值，兼顾丢包网络误判与真实 MTU 回落 |
+| `max-concurrent-*-streams` | `100` | 默认 1000 在小内存机上会耗尽内存 |
+| `stream-receive-window` | `1048576` | 单流接收窗口，默认 5MB 过大 |
+| `receive-window` / `send-window` | `8388608` | 连接级窗口上限，防止单连接最坏缓冲达到 GB 级 |
+| `log-level` | `warn` | `info` 会为每个请求打一行 stats，长期刷屏 |
+
+> 💡 **为什么没开 `user-store` / `restful-api`**：前者会在启动时用存档里的旧密码覆盖 `quic-manager` 菜单刚改的新密码，造成「改完重启又变回去」；后者需在双文件中各占 `127.0.0.1:9090`，会让 `switch-quic` 切换时偶发 bind 冲突，且本项目未提供 API 管理入口。
+
+---
+
+## 🧪 实测记录
+
+以下结果为在 Alpine 3.23.6 / x86_64 / OpenRC / 122MB RAM 的真实 VPS 上、清空 `/etc/shadowquic` 后执行 `sh install-warp-alpine.sh quic` 从零安装所得：
+
+| 项目 | 结果 |
+|:---|:---|
+| 安装 | 退出码 `0`，生成两份配置（权限 `600`）+ `.managed-by-warp-go` 标记 |
+| 服务 | `status: started`，UDP `1443` 正常监听，版本 `0.4.10` |
+| direct 出站 | 出口 IP = 本机 IP；HTTPS `200`；RTT `1.1–2.1ms`；丢包 `0%`；**MTU 由 1400 自动升至 1426** |
+| socks 出站 | `switch-quic socks` 后出口 IP 变为 Cloudflare WARP 地址；HTTPS `200` |
+| 模式回切 | `switch-quic direct` 进程正确回到 `server-direct.yaml` |
+
 ---
 
 ## 📖 目录
@@ -528,6 +564,21 @@ singbox-remove
 ---
 
 ## 📜 更新记录
+
+### 2026-11-11 — ShadowQuic 配置同步至 0.4.x 最佳实践
+
+- 🎭 伪装域名 `www.apple.com` → `www.bing.com`：原域名**不广播 HTTP/3**（无 Alt-Svc），配 `alpn: ["h3"]` 时主动探测一握手就穿帮；新域名属微软/Akamai 自有基础设施（非 Cloudflare 托管），实测 QUIC + H3 均正常
+- 🧱 配置结构由单数 `inbound` / `outbound` 改为 0.4.x 要求的 `inbounds:` / `outbounds:` 列表 + 显式 `tag` + `default-outbound`
+- 🛡 `min-mtu` 1300 → **1200**：`min-mtu` 是 QUIC 载荷下限，取值偏高（如 1380）在 PPPoE / 隧道 / 移动网下会直接黑洞，表现为「握手成功但传不动」
+- 🛡 `initial-mtu` 1300 → **1400**，配合 `mtu-discovery: true`，实测可从 1400 自动探测升至 1426
+- 🛡 `blackhole-detection` `false` → **`true` + `blackhole-threshold: 30`**：保留黑洞检测能力，同时用较高阈值容忍丢包网络的误判
+- ⚡ `jls-upstream.rate-limit` `1000000` → **`10000000`**：该值只限制**未通过 JLS 认证的转发流量**（探测者那条路），不影响代理吞吐；1 Mbps 会让伪装站慢到可疑
+- 📉 `log-level` `info` → **`warn`**：`info` 会为每个代理请求打一行 stats，长期刷屏
+- 💾 新增小内存机保护：`max-concurrent-bidi/uni-streams` 100、`stream-receive-window` 1 MB、`receive-window` / `send-window` 8 MB（默认值单连接最坏缓冲可达 GB 级）
+- ✨ 新增 `direct` 出站的 `dns-strategy: prefer-ipv4` 与 `tcp-keep-alive: true`
+- 🚫 刻意**不启用** `user-store`（会用存档旧密码覆盖 `quic-manager` 刚改的新密码）与 `restful-api`（双文件争抢 `127.0.0.1:9090`，切换时偶发 bind 冲突）
+- 🧪 Alpine 3.23.6 / x86_64 / OpenRC / 122 MB RAM 真机清空后从零安装：退出码 0，UDP 1443 正常，direct 出站 RTT 1.1–2.1 ms、0% 丢包、MTU 自动升至 1426，socks 出站出口 IP 正确变为 WARP 地址，`switch-quic` 双模式切换正常
+- ⚠️ 注意：`config_shadowquic()` 的「配置已存在则跳过覆盖」保护不变，**已部署的机器重跑脚本不会自动套用新配置**，需先移除 `/etc/shadowquic/server-*.yaml` 或手动编辑
 
 ### 2026-10-01 — ShadowQuic 改为自动跟随官方最新版
 
