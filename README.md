@@ -1,5 +1,7 @@
 <div align="center">
 
+<a id="top"></a>
+
 <h1>🚀 warp-go + ShadowQuic + sing-box</h1>
 
 <p><b>Alpine Linux x86_64 上的 WARP、ShadowQuic 与 sing-box 一键部署管理脚本</b></p>
@@ -11,11 +13,34 @@
 [![ShadowQuic](https://img.shields.io/badge/QUIC-ShadowQuic-8a2be2?style=for-the-badge)](https://github.com/spongebob888/shadowquic)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 
-<p><b>WARP 出口 · QUIC 节点 · 多协议 sing-box，三件套一次到位</b></p>
-
-[🚀 快速开始](#-快速开始)　·　[🧩 组件一览](#-组件一览)　·　[🎛 分模式安装](#-分模式安装)　·　[🧰 管理命令](#-管理命令)　·　[❓ 常见问题](#-常见问题)
+[⚡ 30 秒上手](#-30-秒上手)　·　[🎯 解决什么](#-这个项目解决什么)　·　[🎛 分模式安装](#-分模式安装)　·　[🧰 管理命令](#-管理命令)　·　[🔐 安全边界](#-版本管理与安全边界)　·　[❓ 常见问题](#-常见问题)
 
 </div>
+
+---
+
+## ⚡ 30 秒上手
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zhangweixy666/warp-/main/install-warp-alpine.sh -o /root/install-warp-alpine.sh \
+  && chmod +x /root/install-warp-alpine.sh \
+  && sh /root/install-warp-alpine.sh
+```
+
+装完就是这样：
+
+| 组件 | 监听 | 凭据 |
+|:---|:---|:---|
+| WARP SOCKS5 | `127.0.0.1:1080` | 无（仅本机） |
+| ShadowQuic | UDP `1443` | `user1` / `changeme` |
+
+**装完立刻做两件事**
+
+1. 改掉默认密码 `user1 / changeme` —— `quic-manager` → 改密码
+2. 云安全组放行 **UDP 1443**
+
+> 🔒 WARP 的 `1080` 默认**只监听回环**，不要暴露到公网。
+> 📦 `warp` 二进制由脚本从 GitHub Releases 自动下载，仓库不携带二进制副本。
 
 ---
 
@@ -33,98 +58,6 @@
 | 上游更新了想跟进，又怕生产被改坏 | ShadowQuic 自动跟随最新版 + SHA-256 校验 + 覆盖前备份；也可用环境变量钉死版本 |
 
 > 💡 **默认最小可用**：不带参数就是 `WARP + ShadowQuic`，sing-box 是可选模块，不装不影响主流程。
-
----
-
-## 🚀 快速开始
-
-### 1. 下载安装脚本
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/zhangweixy666/warp-/main/install-warp-alpine.sh -o /root/install-warp-alpine.sh
-```
-
-### 2. 赋予执行权限
-
-```bash
-chmod +x /root/install-warp-alpine.sh
-```
-
-### 3. 默认安装（WARP + ShadowQuic）
-
-```bash
-sh /root/install-warp-alpine.sh
-```
-
-装完默认就是这样：
-
-| 组件 | 监听 | 凭据 |
-|:---|:---|:---|
-| WARP SOCKS5 | `127.0.0.1:1080` | 无（仅本机） |
-| ShadowQuic | UDP `1443` | `user1` / `changeme` |
-
-> ⚠️ **装完第一件事：改掉默认密码** `user1 / changeme`，并在云安全组放行 UDP `1443`。
-> 🔒 WARP 的 `1080` 默认**只监听回环**，不要把它暴露到公网。
-> 📦 `warp` 二进制由安装脚本从 GitHub Releases 自动下载，仓库不携带二进制副本。
-
-### ShadowQuic 节点默认参数
-
-生成的两份配置（`server-direct.yaml` / `server-socks.yaml`）除出站外参数一致，均按 ShadowQuic `0.4.x` 的**列表式 schema** 编写：
-
-| 参数 | 值 | 说明 |
-|:---|:---|:---|
-| `bind-addr` | `[::]:1443` | 双栈监听 UDP 1443 |
-| `server-name` / `jls-upstream` | `www.bing.com` | 伪装域名。选微软/Akamai 自有基础设施、**非 Cloudflare 托管**，且该域名真实提供 HTTP/3，主动探测不会穿帮 |
-| `jls-upstream.rate-limit` | `10000000` | 仅限制**未通过 JLS 认证的转发流量**（即探测者那条路），不影响代理吞吐 |
-| `alpn` | `["h3"]` | 必须与伪装域名真实支持的协议一致 |
-| `zero-rtt` | `true` | QUIC 0-RTT 首包即数据 |
-| `congestion-control` | `bbr` | `bbr3` 在 0.4.x 尚未实现，写了会 warn 并回退 BBR |
-| `initial-mtu` / `min-mtu` | `1400` / `1200` | `min-mtu` 取 QUIC 安全下限；设成 1380 这类高值会在 PPPoE/隧道/移动网下黑洞 |
-| `mtu-discovery` | `true` | 实测可从 1400 自动探测升到 1426 |
-| `blackhole-detection` / `blackhole-threshold` | `true` / `30` | 保留黑洞检测但提高阈值，兼顾丢包网络误判与真实 MTU 回落 |
-| `max-concurrent-*-streams` | `100` | 默认 1000 在小内存机上会耗尽内存 |
-| `stream-receive-window` | `1048576` | 单流接收窗口，默认 5MB 过大 |
-| `receive-window` / `send-window` | `8388608` | 连接级窗口上限，防止单连接最坏缓冲达到 GB 级 |
-| `log-level` | `warn` | `info` 会为每个请求打一行 stats，长期刷屏 |
-
-> 💡 **为什么没开 `user-store` / `restful-api`**：前者会在启动时用存档里的旧密码覆盖 `quic-manager` 菜单刚改的新密码，造成「改完重启又变回去」；后者需在双文件中各占 `127.0.0.1:9090`，会让 `switch-quic` 切换时偶发 bind 冲突，且本项目未提供 API 管理入口。
-
----
-
-## 🧪 实测记录
-
-以下结果为在 Alpine 3.23.6 / x86_64 / OpenRC / 122MB RAM 的真实 VPS 上、清空 `/etc/shadowquic` 后执行 `sh install-warp-alpine.sh quic` 从零安装所得：
-
-| 项目 | 结果 |
-|:---|:---|
-| 安装 | 退出码 `0`，生成两份配置（权限 `600`）+ `.managed-by-warp-go` 标记 |
-| 服务 | `status: started`，UDP `1443` 正常监听，版本 `0.4.10` |
-| direct 出站 | 出口 IP = 本机 IP；HTTPS `200`；RTT `1.1–2.1ms`；丢包 `0%`；**MTU 由 1400 自动升至 1426** |
-| socks 出站 | `switch-quic socks` 后出口 IP 变为 Cloudflare WARP 地址；HTTPS `200` |
-| 模式回切 | `switch-quic direct` 进程正确回到 `server-direct.yaml` |
-
----
-
-## 📖 目录
-
-- [🎯 这个项目解决什么](#-这个项目解决什么)
-- [🚀 快速开始](#-快速开始)
-- [🧩 组件一览](#-组件一览)
-- [🎛 分模式安装](#-分模式安装)
-- [🧰 管理命令](#-管理命令)
-  - [WARP](#warp)
-  - [ShadowQuic](#shadowquic)
-  - [sing-box](#sing-box)
-- [🏗 架构与数据流](#-架构与数据流)
-- [💾 备份与恢复](#-备份与恢复)
-- [🔐 版本管理与安全边界](#-版本管理与安全边界)
-- [🔍 常用排障](#-常用排障)
-- [🧹 卸载](#-卸载)
-- [🧩 系统要求](#-系统要求)
-- [❓ 常见问题](#-常见问题)
-- [📜 更新记录](#-更新记录)
-- [📦 源码与构建](#-源码与构建)
-- [🙏 致谢与许可](#-致谢与许可)
 
 ---
 
@@ -158,15 +91,10 @@ sh /root/install-warp-alpine.sh
 不需要全部组件时，可以只装其中一项：
 
 ```bash
-sh /root/install-warp-alpine.sh all
-```
-
-```bash
-sh /root/install-warp-alpine.sh warp
-```
-
-```bash
-sh /root/install-warp-alpine.sh quic
+sh /root/install-warp-alpine.sh all      # WARP + ShadowQuic（默认）
+sh /root/install-warp-alpine.sh warp     # 只装 WARP SOCKS5
+sh /root/install-warp-alpine.sh quic     # 只装 ShadowQuic
+sh /root/install-warp-alpine.sh remove   # 卸载
 ```
 
 | 参数 | 含义 |
@@ -178,30 +106,40 @@ sh /root/install-warp-alpine.sh quic
 
 ---
 
+## ⚙️ ShadowQuic 节点默认参数
+
+生成的两份配置（`server-direct.yaml` / `server-socks.yaml`）除出站外参数一致，均按 ShadowQuic `0.4.x` 的**列表式 schema** 编写：
+
+| 参数 | 值 | 说明 |
+|:---|:---|:---|
+| `bind-addr` | `[::]:1443` | 双栈监听 UDP 1443 |
+| `server-name` / `jls-upstream` | `www.bing.com` | 伪装域名。选微软/Akamai 自有基础设施、**非 Cloudflare 托管**，且该域名真实提供 HTTP/3，主动探测不会穿帮 |
+| `jls-upstream.rate-limit` | `10000000` | 仅限制**未通过 JLS 认证的转发流量**（即探测者那条路），不影响代理吞吐 |
+| `alpn` | `["h3"]` | 必须与伪装域名真实支持的协议一致 |
+| `zero-rtt` | `true` | QUIC 0-RTT 首包即数据 |
+| `congestion-control` | `bbr` | `bbr3` 在 0.4.x 尚未实现，写了会 warn 并回退 BBR |
+| `initial-mtu` / `min-mtu` | `1400` / `1200` | `min-mtu` 取 QUIC 安全下限；设成 1380 这类高值会在 PPPoE/隧道/移动网下黑洞 |
+| `mtu-discovery` | `true` | 实测可从 1400 自动探测升到 1426 |
+| `blackhole-detection` / `blackhole-threshold` | `true` / `30` | 保留黑洞检测但提高阈值，兼顾丢包网络误判与真实 MTU 回落 |
+| `max-concurrent-*-streams` | `100` | 默认 1000 在小内存机上会耗尽内存 |
+| `stream-receive-window` | `1048576` | 单流接收窗口，默认 5MB 过大 |
+| `receive-window` / `send-window` | `8388608` | 连接级窗口上限，防止单连接最坏缓冲达到 GB 级 |
+| `log-level` | `warn` | `info` 会为每个请求打一行 stats，长期刷屏 |
+
+> 💡 **为什么没开 `user-store` / `restful-api`**：前者会在启动时用存档里的旧密码覆盖 `quic-manager` 菜单刚改的新密码，造成「改完重启又变回去」；后者需在双文件中各占 `127.0.0.1:9090`，会让 `switch-quic` 切换时偶发 bind 冲突，且本项目未提供 API 管理入口。
+
+---
+
 ## 🧰 管理命令
 
 ### WARP
 
 ```bash
-warpctl status
-```
-
-```bash
-warpctl restart
-```
-
-```bash
-warpctl ip
-```
-
-```bash
-warpctl log
-```
-
-打开交互式面板：
-
-```bash
-warp-manager
+warpctl status      # 服务状态
+warpctl restart     # 重启
+warpctl ip          # 查看当前出口 IP
+warpctl log         # 查看日志
+warp-manager       # 交互式面板
 ```
 
 验证出口是否真的走了 WARP：
@@ -212,118 +150,65 @@ curl -x socks5h://127.0.0.1:1080 https://ipv4.icanhazip.com
 
 ### ShadowQuic
 
-打开管理面板：
-
 ```bash
-quic-manager
-```
+quic-manager              # 交互式面板（含改密码）
 
-切换出站模式：
-
-```bash
-switch-quic direct
-```
-
-```bash
-switch-quic socks
-```
-
-```bash
-switch-quic status
-```
-
-```bash
-switch-quic restart
-```
-
-```bash
-switch-quic stop
+switch-quic direct        # 出站走本机公网 IP
+switch-quic socks         # 出站走 WARP SOCKS5
+switch-quic status        # 当前模式 + 服务状态
+switch-quic restart       # 按当前模式重启
+switch-quic stop          # 停止（不误杀外部实例）
 ```
 
 看端口：
 
 ```bash
-ss -lntup
+ss -lntup        # TCP
+ss -lunp         # UDP
 ```
 
-```bash
-ss -lunp
-```
+### sing-box（可选模块）
 
-### sing-box
-
-安装程序与管理器（不自动创建节点）：
+安装程序与管理器（**不自动创建节点**）：
 
 ```bash
 sh /root/install-warp-alpine.sh singbox-install
 ```
 
-创建第一个节点（交互式 VLESS + WebSocket）：
-
 ```bash
-singbox-manager vless-ws
+singbox-manager vless-ws    # 创建第一个节点（交互式 VLESS + WebSocket）
+singbox-manager             # 打开完整菜单
+singbox-status              # 状态
+singbox-restart             # 重启
+sing-box check -c /etc/sing-box/config.json   # 校验配置
+tail -n 100 /var/log/sing-box/sing-box.log    # 日志
 ```
 
-打开完整菜单：
+**出站快捷开关**
 
 ```bash
-singbox-manager
+sb-on          # 开
+sb-off         # 关
+sb-restart     # 重启
 ```
 
-查看状态 / 重启 / 日志：
-
-```bash
-singbox-status
-```
-
-```bash
-singbox-restart
-```
-
-```bash
-tail -n 100 /var/log/sing-box/sing-box.log
-```
-
-校验配置：
-
-```bash
-sing-box check -c /etc/sing-box/config.json
-```
-
-**sing-box 出站快捷开关**
-
-```bash
-sb-on
-```
-
-```bash
-sb-off
-```
-
-```bash
-sb-restart
-```
-
-等价写法：
-
-```bash
-sh /root/install-warp-alpine.sh sb-on
-```
+等价写法：`sh /root/install-warp-alpine.sh sb-on`
 
 > 📌 `sb-on` / `sb-off` 只重启 sing-box，**不会**重启 ShadowQuic。
 > 📌 管理器脚本来自 [`-singbox1.3.x-vless-anytls`](https://github.com/zhangweixy666/-singbox1.3.x-vless-anytls)，默认跟随其 `main` 最新版；要钉死版本用 `SINGBOX_MANAGER_REF=<commit|tag|branch>`。
 
-**支持的节点类型**
-
-- VLESS + Reality
-- AnyTLS
-- TUIC
-- Hysteria2
-- VLESS + WebSocket
-- VMess + WebSocket
-- 自签证书 / Cloudflare ACME 证书
+**支持的节点类型**：VLESS + Reality、AnyTLS、TUIC、Hysteria2、VLESS + WebSocket、VMess + WebSocket、自签证书 / Cloudflare ACME 证书。
 
 > ⚠️ 默认测试配置是 VLESS + WebSocket **无 TLS**，只适合验证流程，不建议直接当生产公网节点。正式部署请用 Reality、TLS 或反代，并设置强认证参数。
+
+**备份与恢复**
+
+```bash
+singbox-backup      # 备份 /etc/sing-box/
+singbox-restore     # 从备份恢复
+```
+
+> `singbox-remove` 会**保留** `/etc/sing-box/` 下的配置、证书和备份，方便后续恢复。
 
 ---
 
@@ -350,27 +235,24 @@ sh /root/install-warp-alpine.sh sb-on
 **文件位置**
 
 ```text
-/etc/sing-box/config.json
-/etc/sing-box/backups/
-/etc/sing-box/certs/
-/etc/sing-box/reality/
-/etc/shadowquic/
-/opt/warp-go/
+/etc/shadowquic/          ShadowQuic 配置（server-direct.yaml / server-socks.yaml / last-mode）
+/opt/warp-go/             warp-go 二进制与日志
+/etc/sing-box/            sing-box 配置 / 备份 / 证书 / Reality 密钥
 ```
 
 ---
 
-## 💾 备份与恢复
+## 🧪 实测记录
 
-```bash
-singbox-backup
-```
+以下结果为在 Alpine 3.23.6 / x86_64 / OpenRC / 122MB RAM 的真实 VPS 上、清空 `/etc/shadowquic` 后执行 `sh install-warp-alpine.sh quic` 从零安装所得：
 
-```bash
-singbox-restore
-```
-
-> `singbox-remove` 会**保留** `/etc/sing-box/` 下的配置、证书和备份，方便后续恢复。
+| 项目 | 结果 |
+|:---|:---|
+| 安装 | 退出码 `0`，生成两份配置（权限 `600`）+ `.managed-by-warp-go` 标记 |
+| 服务 | `status: started`，UDP `1443` 正常监听，版本 `0.4.10` |
+| direct 出站 | 出口 IP = 本机 IP；HTTPS `200`；RTT `1.1–2.1ms`；丢包 `0%`；**MTU 由 1400 自动升至 1426** |
+| socks 出站 | `switch-quic socks` 后出口 IP 变为 Cloudflare WARP 地址；HTTPS `200` |
+| 模式回切 | `switch-quic direct` 进程正确回到 `server-direct.yaml` |
 
 ---
 
@@ -387,14 +269,9 @@ singbox-restore
 - 覆盖后**回读版本号二次确认**，防止「替换成功但没生效」的假成功
 - 服务在跑且确认归属本仓库时才自动重启；无法确认归属只提示，不擅自动别人的服务
 
-**钉版本 / 强制重装**
-
 ```bash
-SHADOWQUIC_VERSION=v0.3.13 sh /root/install-warp-alpine.sh quic
-```
-
-```bash
-SHADOWQUIC_FORCE=1 sh /root/install-warp-alpine.sh quic
+SHADOWQUIC_VERSION=v0.3.13 sh /root/install-warp-alpine.sh quic   # 钉死版本
+SHADOWQUIC_FORCE=1 sh /root/install-warp-alpine.sh quic           # 强制重装
 ```
 
 ### 归属保护（重要）
@@ -420,27 +297,12 @@ touch /etc/shadowquic/.managed-by-warp-go
 ## 🔍 常用排障
 
 ```bash
-warpctl status
-```
-
-```bash
-rc-service shadowquic status
-```
-
-```bash
-singbox-status
-```
-
-```bash
-ss -lntup
-```
-
-```bash
-tail -n 100 /var/log/shadowquic-service.log
-```
-
-```bash
-tail -n 100 /var/log/sing-box/sing-box.log
+warpctl status                          # WARP 状态
+rc-service shadowquic status            # ShadowQuic 服务状态
+singbox-status                          # sing-box 状态
+ss -lntup                               # 所有监听端口
+tail -n 100 /var/log/shadowquic-service.log   # ShadowQuic 日志
+tail -n 100 /var/log/sing-box/sing-box.log    # sing-box 日志
 ```
 
 **逐项检查**
@@ -458,11 +320,8 @@ tail -n 100 /var/log/sing-box/sing-box.log
 ## 🧹 卸载
 
 ```bash
-sh /root/install-warp-alpine.sh remove
-```
-
-```bash
-singbox-remove
+sh /root/install-warp-alpine.sh remove   # 卸载 WARP + ShadowQuic
+singbox-remove                          # 单独卸载 sing-box
 ```
 
 > 🛡 **卸载保护**：`remove` 会检查 `/etc/shadowquic/.managed-by-warp-go` 标记。标记不存在说明配置可能由其他项目（如 suoha-plus）创建，脚本会拒绝卸载并退出，避免误删他人配置。
@@ -504,7 +363,7 @@ singbox-remove
 </details>
 
 <details>
-<summary><b>`direct` 和 `socks` 出站到底差在哪？</b></summary>
+<summary><b><code>direct</code> 和 <code>socks</code> 出站到底差在哪？</b></summary>
 
 - `direct`：ShadowQuic 直接用自己的公网 IP 出站，链路最短、延迟最低
 - `socks`：ShadowQuic 把流量交给本机 WARP 的 SOCKS5，落地 IP 变成 Cloudflare WARP 的 IP，常用于解锁或换地区
@@ -538,6 +397,8 @@ singbox-remove
 
 不想跟随上游就用 `SHADOWQUIC_VERSION=v0.3.13` 钉死。
 
+> ⚠️ `config_shadowquic()` 的「配置已存在则跳过覆盖」保护意味着：**已部署的机器重跑脚本不会自动套用新配置**。要验证新配置，需先移走 `/etc/shadowquic/server-*.yaml`（备份后再删）。
+
 </details>
 
 <details>
@@ -548,14 +409,14 @@ singbox-remove
 </details>
 
 <details>
-<summary><b>`singbox-remove` 会删我的配置吗？</b></summary>
+<summary><b><code>singbox-remove</code> 会删我的配置吗？</b></summary>
 
 不会。它会保留 `/etc/sing-box/` 下的 `config.json`、证书和 `backups/`，只卸载程序和服务。
 
 </details>
 
 <details>
-<summary><b>为什么仓库里没有 `warp` 二进制？</b></summary>
+<summary><b>为什么仓库里没有 <code>warp</code> 二进制？</b></summary>
 
 因为它有 8.5 MB，且容易与 Release 资产漂移。现在统一从 GitHub Releases 下载，仓库只保留脚本与源码归档（`warp-go-src-*.tar.gz`）。
 
@@ -567,20 +428,31 @@ singbox-remove
 
 ### 2026-11-11 — ShadowQuic 配置同步至 0.4.x 最佳实践
 
-- 🎭 伪装域名 `www.apple.com` → `www.bing.com`：原域名**不广播 HTTP/3**（无 Alt-Svc），配 `alpn: ["h3"]` 时主动探测一握手就穿帮；新域名属微软/Akamai 自有基础设施（非 Cloudflare 托管），实测 QUIC + H3 均正常
-- 🧱 配置结构由单数 `inbound` / `outbound` 改为 0.4.x 要求的 `inbounds:` / `outbounds:` 列表 + 显式 `tag` + `default-outbound`
-- 🛡 `min-mtu` 1300 → **1200**：`min-mtu` 是 QUIC 载荷下限，取值偏高（如 1380）在 PPPoE / 隧道 / 移动网下会直接黑洞，表现为「握手成功但传不动」
-- 🛡 `initial-mtu` 1300 → **1400**，配合 `mtu-discovery: true`，实测可从 1400 自动探测升至 1426
-- 🛡 `blackhole-detection` `false` → **`true` + `blackhole-threshold: 30`**：保留黑洞检测能力，同时用较高阈值容忍丢包网络的误判
-- ⚡ `jls-upstream.rate-limit` `1000000` → **`10000000`**：该值只限制**未通过 JLS 认证的转发流量**（探测者那条路），不影响代理吞吐；1 Mbps 会让伪装站慢到可疑
-- 📉 `log-level` `info` → **`warn`**：`info` 会为每个代理请求打一行 stats，长期刷屏
-- 💾 新增小内存机保护：`max-concurrent-bidi/uni-streams` 100、`stream-receive-window` 1 MB、`receive-window` / `send-window` 8 MB（默认值单连接最坏缓冲可达 GB 级）
-- ✨ 新增 `direct` 出站的 `dns-strategy: prefer-ipv4` 与 `tcp-keep-alive: true`
-- 🚫 刻意**不启用** `user-store`（会用存档旧密码覆盖 `quic-manager` 刚改的新密码）与 `restful-api`（双文件争抢 `127.0.0.1:9090`，切换时偶发 bind 冲突）
-- 🧪 Alpine 3.23.6 / x86_64 / OpenRC / 122 MB RAM 真机清空后从零安装：退出码 0，UDP 1443 正常，direct 出站 RTT 1.1–2.1 ms、0% 丢包、MTU 自动升至 1426，socks 出站出口 IP 正确变为 WARP 地址，`switch-quic` 双模式切换正常
-- ⚠️ 注意：`config_shadowquic()` 的「配置已存在则跳过覆盖」保护不变，**已部署的机器重跑脚本不会自动套用新配置**，需先移除 `/etc/shadowquic/server-*.yaml` 或手动编辑
+> 核心变化：**配置结构与「能连通」的调优参数**。已部署机器需手动应用（见上方 FAQ）。
 
-### 2026-10-01 — ShadowQuic 改为自动跟随官方最新版
+- 🎭 伪装域名 `www.apple.com` → **`www.bing.com`**
+- 🧱 配置结构改为 0.4.x 要求的 `inbounds:` / `outbounds:` 列表 + 显式 `tag` + `default-outbound`
+- 🛡 MTU 三项：`min-mtu` 1300 → **1200**、`initial-mtu` 1300 → **1400** + `mtu-discovery: true`、`blackhole-detection` → **`true` + 阈值 30**
+- ⚡ `jls-upstream.rate-limit` 1 Mbps → **10 Mbps**
+- 📉 `log-level` `info` → **`warn`**
+- 💾 小内存机保护：`max-concurrent-*-streams` 100、`stream-receive-window` 1 MB、`receive/send-window` 8 MB
+- ✨ `direct` 出站新增 `dns-strategy: prefer-ipv4` 与 `tcp-keep-alive: true`
+- 🚫 刻意不启用 `user-store`（旧密码覆盖新密码）与 `restful-api`（双文件争抢 `127.0.0.1:9090`）
+
+<details>
+<summary><b>📚 详细说明与历史版本</b></summary>
+
+<br>
+
+**2026-11-11 详细**
+
+- 🎭 `www.apple.com` **不广播 HTTP/3**（无 Alt-Svc），配 `alpn: ["h3"]` 时主动探测一握手就穿帮。`www.bing.com` 属微软/Akamai 自有基础设施（非 Cloudflare 托管），实测 QUIC + H3 均正常
+- 🛡 `min-mtu` 是 QUIC 载荷下限，取值偏高（如 1380）在 PPPoE / 隧道 / 移动网下会直接黑洞，表现为「握手成功但传不动」
+- ⚡ `rate-limit` 只限制未通过 JLS 认证的转发流量（探测者那条路），不影响代理吞吐；1 Mbps 会让伪装站慢到可疑
+- 💾 默认值单连接最坏缓冲可达 GB 级，小内存机必须压
+- 🧪 Alpine 3.23.6 / x86_64 / OpenRC / 122 MB RAM 真机清空后从零安装：退出码 0，UDP 1443 正常，direct 出站 RTT 1.1–2.1 ms、0% 丢包、MTU 自动升至 1426，socks 出站出口 IP 正确变为 WARP 地址
+
+**2026-10-01 — ShadowQuic 改为自动跟随官方最新版**
 
 - 🔄 `install_shadowquic` 不再「已安装就跳过」，改为拉取最新 release 并覆盖升级（0.3.12 → 0.4.0 真机实测通过）
 - ✅ 同版本跳过，保持重复执行幂等
@@ -590,21 +462,20 @@ singbox-remove
 - 🩹 下载失败按 HTTP 状态码精确诊断（`404` = 版本不存在，其他才是网络问题）
 - 🩹 断网时保留当前可用版本且命令不中断
 
-<details>
-<summary><b>📚 历史版本（点击展开）</b></summary>
-
-<br>
-
 **2026-09-01 — sing-box 管理器改为自动同步上游最新版**
+
 `singbox-install` 不再钉固定 commit，改为跟随 `-singbox1.3.x-vless-anytls` 的 `main`；新增 `SINGBOX_MANAGER_REF` 可钉任意 commit/tag/分支；同步失败时区分「本地已有则继续」与「本地没有则报错」。
 
 **2026-09-01 — 仓库卫生与许可证补全**
+
 移除仓库内 8.5 MB 的 `warp` 二进制副本（与 Release 资产完全一致，纯冗余）；源码包补入 `LICENSE` 与 `UPSTREAM-NOTES.md`，4 个 `.go` 文件加 SPDX 头；`.gitignore` 改为匹配本仓库形态；新增「源码与构建」章节。
 
 **2026-08-31 — Alpine 真机两轮全量实测**
+
 移除 `set -o pipefail`（busybox ash 下会让 `$(curl | grep | sed)` 失败触发 `set -e`，导致所有下载失败提示变成死代码）；三处下载统一 `curl -fsSL` + 显式失败捕获；`remove` / `switch-quic` / `quic-manager` 不再 `pkill -f shadowquic`，改归属标记判定；`start_shadowquic_checked` 改用 `rc-service status` + pid 文件精确判定；`sb-on/off` 写回前 `chmod 600`；配置保护由「两份都存在」改为「任一存在」；补 `mkdir -p /var/log/shadowquic` 与绝对路径 `exec`；清理一处无效 UTF-8 字节；兜底版本升到 `v0.3.13`；安装完输出默认凭据安全提示。
 
 **2026-08-30 — 脚本修订**
+
 `warpctl log` 日志路径修正（`/opt/warp-go/warp.log`）；`config_shadowquic` 不再无条件覆盖已有配置；`remove` 未删净时改为警告而非误报成功；修 2 处乱码文案。
 
 </details>
@@ -626,17 +497,21 @@ singbox-remove
 
 ```bash
 tar xzf warp-go-src-20260726-fixed.tar.gz
-```
-
-```bash
 cd warp-go
-```
-
-```bash
 go build -trimpath -ldflags='-s -w' -o warp .
 ```
 
 预编译二进制通过 [GitHub Releases](https://github.com/zhangweixy666/warp-/releases) 分发。本地已有 `/usr/local/bin/warp`、`/root/warp`、`/home/warp`、`/tmp/warp` 时安装脚本会优先复用。
+
+---
+
+## 🔗 相关项目
+
+| 项目 | 定位 |
+|:---|:---|
+| [**suoha-plus**](https://github.com/zhangweixy666/suoha-plus) | Xray 多模式节点一键管理（Reality / Cloudflare Tunnel / ShadowQuic），Debian · Ubuntu · Alpine 通用 |
+| [**-singbox1.3.x-vless-anytls**](https://github.com/zhangweixy666/-singbox1.3.x-vless-anytls) | sing-box 六协议 + Cloudflare Tunnel 管理，本项目的可选模块上游 |
+| [**dns-setup**](https://github.com/zhangweixy666/dns-setup) | VPS DNS 自动配置，AKDNS 测速 + 六层 DHCP 防覆盖 |
 
 ---
 
@@ -657,7 +532,7 @@ go build -trimpath -ldflags='-s -w' -o warp .
 
 <div align="center">
 
-**[⬆ 回到顶部](#-warp-go--shadowquic--sing-box)**
+**[⬆ 回到顶部](#top)**
 
 Made with 🚀 by [zhangweixy666](https://github.com/zhangweixy666)
 
